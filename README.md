@@ -4,6 +4,8 @@
 「ミヒョーン」とうねる FM 音と、「グワーン」と膨らむドローンのための機械です。
 弾かなくても音楽が続き、ツマミを回して部屋の空気を変える——そういう楽器を目指しました。
 
+> **アイデアの出どころ**：このアンビエント・マシンの最初のアイデアは、日本のロックバンド **ASYLUM** のギタリスト **HIROSHI** によるものです。
+
 An original generative ambient drone firmware for the M-VAVE FM-1 mini FM synth.
 It plays itself from power-on: slow gliding FM voices, deep swelling drones,
 distant radio-like beacons, all steered by feel-good knob macros. Never harsh,
@@ -109,6 +111,7 @@ JieLi ツールチェーンと AC79 SDK の取得は fm1-base 側の `tools/get_
 - **プラットフォーム fm1-base** は Charles Vestal によるもので、**MPL-2.0** です。
   本リポジトリには fm1-base 本体は含まれません。fm1-base 由来のファイルや、
   その改変にあたる部分については MPL-2.0 が適用されます。
+- The original idea for this ambient machine came from **HIROSHI**, guitarist of the Japanese rock band **ASYLUM**.
 - GWAAN-1 is built on [fm1-base](https://github.com/CharlesVestal/fm1-base)
   (Charles Vestal, MPL-2.0) and felucca-bsp. Thanks to the FM-1 custom-firmware community.
 
