@@ -8,7 +8,7 @@ ble = false                    # no Bluetooth in v0.1: the app is self-contained
 # companion left out on purpose (v0.1 scope): settings live on the panel + SAVE
 # the site (tools/make_site.py, tools/publish_site.sh)
 tagline = "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs"
-repo = ""
+repo = "https://github.com/fedlic/fm1-gwaan1"
 licence = "MPL-2.0 (platform) / app: FEDLIC TOKYO"
 credits = "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp."
 # firmware.json, for firmware hubs (docs/FIRMWARE-JSON.md)
@@ -17,4 +17,4 @@ description = "GWAAN-1 turns the FM-1 into an ambient drone machine. Layers - a 
 tags = ["synth", "generative", "ambient"]
 install = ""
 site = ""
-screenshot = ""
+screenshot = "docs/img/screen.png"

@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "gwaan1",
+  "name": "GWAAN-1",
+  "author": "FEDLIC TOKYO",
+  "license": "MIT AND MPL-2.0",
+  "tagline": "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs",
+  "description": "GWAAN-1 turns the FM-1 into an ambient drone machine that plays itself from power-on. A gliding FM voice (mihyon), a sub drone whose chord fields crossfade every 35-50 seconds (guwaan), filtered-noise air with rare water drops, and since v0.2 a distant beacon: soft sine pings in morse-like patterns, washed in echo. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN) and knob macros for glide, depth, space and drift. Smoothed and limited: never harsh.",
+  "tags": [
+    "synth",
+    "generative",
+    "ambient"
+  ],
+  "source": "https://github.com/fedlic/fm1-gwaan1",
+  "screenshot": "docs/img/screen.png",
+  "hardware": {
+    "models": [
+      "FM-1"
+    ],
+    "flash": [
+      "856014",
+      "B36014"
+    ],
+    "features": [
+      "usb-audio-in",
+      "usb-audio-out",
+      "screen-reader"
+    ]
+  },
+  "credits": "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp. App code by FEDLIC TOKYO, MIT."
+}
