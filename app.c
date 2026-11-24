@@ -26,6 +26,13 @@
  * PLAY's stop also drains the wet tail, and the tuning constants and
  * layout facts live in named, asserted places below.
  *
+ * v0.4.2: a visuals-only release - the screen was "too plain". The
+ * gradient sea now carries a swell orb, per-scene particles, sonar
+ * rings from the pings, an output level ribbon, and a FREEZE frost,
+ * all on a visual clock that stops when the sound freezes. No audio
+ * or control behaviour changes; the render only gained an observer
+ * (the ribbon's level history).
+ *
  * Layers, generated from power-on:
  *   MIHYON - an FM voice whose modulator pitch glides slowly (seconds-long
  *            cycles), so the harmonics sweep and wail, gently.
@@ -466,6 +473,15 @@ static float echo_lp2;                   /* the echo's second tap (half the dela
  * page's key-light meters; written by the render, read by the UI */
 static volatile float eng_lvl[4];
 
+/* v0.4.2: the output level history behind the screen's audio ribbon.
+ * One RMS value per audio block (256 frames, ~5.8 ms), 240 of them:
+ * ~1.4 s of history. Written by the render, read by the UI; pure
+ * observation, the audio path never reads it. While FREEZE is engaged
+ * the render stops pushing, so the ribbon holds still with the wash. */
+#define LVL_N 240
+static volatile float lvl_hist[LVL_N];
+static volatile uint32_t lvl_head;       /* the next slot to write */
+
 /* SELECT (v0.2.1): a real resonant filter, replacing the POKE-1-derived
  * tone tilt the user called out on the device ("tone, not a filter").
  * Two Zavalishin (TPT) state-variable stages in cascade per side give a
@@ -711,6 +727,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float gain_t = (float)master_q12 / 4096.0f * 8300000.0f * 1.6f;
     static float gain_now, eng_gain;
     static float blk_pk[4];              /* v0.3: per-block layer peaks for the mixer meters */
+    static float lvl_ss;                 /* v0.4.2: the ribbon's per-block sum of squares */
     static uint8_t frz_prev;             /* v0.3: the freeze engage edge */
     static float flfo_ph;                /* v0.4: the filter LFO's phase */
     const scene_t *sc = &SCENE[set.scene];
@@ -1154,6 +1171,12 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             gR = oR * SM.lim * gain_now;
             lr[2 * i] = (int32_t)gL;
             lr[2 * i + 1] = (int32_t)gR;
+            /* v0.4.2: the ribbon's sum of squares (normalised to
+             * full scale here, so the block RMS comes out 0..~1) */
+            {
+                float qL = gL * (1.0f / 8388608.0f), qR = gR * (1.0f / 8388608.0f);
+                lvl_ss += qL * qL + qR * qR;
+            }
         }
         sample_now++;
     }
@@ -1162,6 +1185,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         for (j = 0; j < 4; j++) {
             eng_lvl[j] = blk_pk[j] > eng_lvl[j] ? blk_pk[j] : eng_lvl[j] * 0.93f;
             blk_pk[j] = 0.0f;
+        }
+    }
+    {                                    /* v0.4.2: publish one ribbon point */
+        float rms = fm_sqrtf(lvl_ss / (2.0f * (float)n));
+        lvl_ss = 0.0f;
+        if (!eng_freeze) {               /* frozen: the trace holds still */
+            lvl_hist[lvl_head] = rms;
+            lvl_head = (lvl_head + 1u) % LVL_N;
         }
     }
 }
@@ -1490,12 +1521,20 @@ static float key_freq(int k)
     return f;
 }
 
+/* v0.4.2: the screen's key blip - the last key voice's position on the
+ * keyboard and when it spoke, so the main page can flash a soft dot at
+ * that spot on its ribbon. Written here (the UI thread), read by draw. */
+static int32_t vis_blip_key = -1;
+static uint32_t vis_blip_at;
+
 /* A voice for a marker: a panel key (0..26) or a MIDI note (-1-note).
  * v0.4: MIDI notes start here too, with their velocity. A voice already
  * sounding for the marker retriggers (the arp's repeated steps). */
 static void voice_start(int marker, float freq, float vel)
 {
     int i, best = -1;
+    vis_blip_key = marker >= 0 ? marker : nearest_key(freq);
+    vis_blip_at = plat_ms();
     for (i = 0; i < NKEYV; i++)
         if (keyv[i].st == 1 && keyv[i].key == marker) {
             keyv[i].ph = 0.0f;
@@ -2331,6 +2370,242 @@ static void input(void)
 
 void app_input_only(void) { input(); }
 
+/* ------------------------------------------------- v0.4.2: screen life ---
+ * The main page used to be a bare gradient sea with one drifting light
+ * band - the user's verdict: "寂しすぎ" (too plain). The sea now
+ * carries a soft orb breathing with the swell, per-scene particles
+ * (STARS twinkle, RAIN streaks fall, DEEP bubbles rise under light
+ * rays, FOREST fireflies drift, DAWN gets a horizon glow), sonar rings
+ * from the SIGNAL pings, an audio ribbon along the lower edge driven
+ * by the output's own level history, and a frost that creeps in under
+ * FREEZE. All motion is slow and soft-edged: no flashing, ever.
+ *
+ * Everything blends against the gradient's row colours (the sea is
+ * row-uniform, so the colour under any pixel is known without reading
+ * the canvas back). Motion runs on a visual clock, vis_t -
+ * milliseconds of UNfrozen time: under FREEZE the clock stops, the
+ * particles hold, the swell reading holds, and the ribbon stops (the
+ * render stops feeding it), so the whole scene visibly waits.
+ * Particles come from a table seeded per scene by a dedicated
+ * xorshift - never the audio RNG - so host screenshots reproduce. */
+static uint32_t vis_t;                   /* the visual clock, ms */
+static uint32_t vis_last;                /* plat_ms at the previous draw */
+static float vis_swell;                  /* the swell reading, held under FREEZE */
+static float vis_frost;                  /* the frost blend, 0..1, glided */
+static uint16_t rowcol[150];             /* this frame's gradient, per row */
+
+static uint16_t col_blend(uint16_t a, uint16_t b, float t)
+{
+    float r = (float)((a >> 11) & 31u) + ((float)((b >> 11) & 31u) - (float)((a >> 11) & 31u)) * t;
+    float g = (float)((a >> 5) & 63u) + ((float)((b >> 5) & 63u) - (float)((a >> 5) & 63u)) * t;
+    float bl = (float)(a & 31u) + ((float)(b & 31u) - (float)(a & 31u)) * t;
+    return (uint16_t)(((uint32_t)r << 11) | ((uint32_t)g << 5) | (uint32_t)bl);
+}
+
+/* blend fg over the gradient colour of row y, alpha a (0..1). Only
+ * valid while the 240x150 gradient canvas is the active one. */
+static void pset_blend(int32_t x, int32_t y, uint16_t fg, float a)
+{
+    if ((uint32_t)x >= 240u || (uint32_t)y >= 150u || a <= 0.0f)
+        return;
+    if (a > 1.0f)
+        a = 1.0f;
+    cv_pset(x, y, col_blend(rowcol[y], fg, a));
+}
+
+static float wrapf(float v, float m)     /* v mod m, for v >= 0 */
+{
+    return v - m * (float)(int32_t)(v / m);
+}
+
+/* the particle table: four 0..1 numbers per particle (x, y, phase,
+ * character), seeded per scene from a fixed seed */
+#define NPART 40
+static float part_p[NPART][4];
+static int part_scene = -1;
+static void part_seed(int scene)
+{
+    uint32_t s = 0x2545F491u + (uint32_t)(scene + 1) * 0x9E3779B9u;
+    int i, j;
+    for (i = 0; i < NPART; i++)
+        for (j = 0; j < 4; j++) {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            part_p[i][j] = (float)(s >> 8) * (1.0f / 16777216.0f);
+        }
+    part_scene = scene;
+}
+
+/* the swell orb: a soft disc at the sea's centre whose radius and
+ * light follow the swell. The falloff is computed on squared distance
+ * (no sqrt, no hard edge anywhere). */
+static void draw_orb(float swell01, float bright)
+{
+    const int32_t cx = 120, cy = 68;
+    float R = 30.0f + 15.0f * swell01;
+    float inv = 1.0f / (R * R);
+    uint16_t fg = RGB(216, 232, 250);
+    int32_t x, y, ext = (int32_t)(R * 1.19f) + 1;
+    float gain = bright * (0.72f + 0.28f * swell01);
+    for (y = cy - ext; y <= cy + ext; y++) {
+        float dy = (float)(y - cy) * 1.12f;
+        for (x = cx - ext; x <= cx + ext; x++) {
+            float dx = (float)(x - cx);
+            float d2 = (dx * dx + dy * dy) * inv;
+            float a;
+            if (d2 >= 1.4f)
+                continue;
+            if (d2 < 1.0f) {
+                float u = 1.0f - d2;
+                a = 0.05f + 0.33f * u * u;
+            } else
+                a = 0.05f * (1.4f - d2) / 0.4f;
+            pset_blend(x, y, fg, a * gain);
+        }
+    }
+}
+
+static void draw_particles(float t, float bright)
+{
+    int i;
+    if (part_scene != (int)set.scene)
+        part_seed((int)set.scene);
+    switch (set.scene) {
+    case SC_STARS:
+        for (i = 0; i < NPART; i++) {
+            float tw = 0.5f + 0.5f * fm_sinf(t * (0.25f + part_p[i][2] * 0.8f) +
+                                             part_p[i][1] * TWO_PI);
+            float a = (0.13f + 0.8f * tw * tw) * bright;
+            int32_t x = (int32_t)(part_p[i][0] * 236.0f) + 2;
+            int32_t y = (int32_t)(part_p[i][1] * 136.0f) + 2;
+            pset_blend(x, y, RGB(219, 233, 255), a);
+            if (part_p[i][3] > 0.82f) {  /* the brightest few spread a little */
+                pset_blend(x + 1, y, RGB(219, 233, 255), a * 0.55f);
+                pset_blend(x, y + 1, RGB(219, 233, 255), a * 0.55f);
+            }
+        }
+        break;
+    case SC_RAIN:
+        for (i = 0; i < 22; i++) {
+            float sp = 30.0f + part_p[i][2] * 22.0f;      /* px/s, falling */
+            int32_t y0 = (int32_t)wrapf(part_p[i][1] * 158.0f + t * sp, 158.0f) - 4;
+            int32_t x0 = (int32_t)(part_p[i][0] * 244.0f) - (y0 >> 2);
+            int j;
+            for (j = 0; j < 4; j++)
+                pset_blend(x0 - (j >> 1), y0 + j, RGB(178, 204, 228),
+                           (0.46f - 0.10f * (float)j) * bright);
+        }
+        break;
+    case SC_DEEP: {
+        int r2, x, y;
+        /* light rays from the surface: three soft swaying columns */
+        for (r2 = 0; r2 < 3; r2++) {
+            float cx = 36.0f + (float)r2 * 82.0f + 9.0f * fm_sinf(t * 0.07f + (float)r2 * 2.1f);
+            for (y = 0; y < 58; y++) {
+                float ay = (1.0f - (float)y / 58.0f) * 0.16f * bright;
+                for (x = (int32_t)cx - 6; x < (int32_t)cx + 6; x++) {
+                    float ax = 1.0f - fm_fabsf((float)x - cx) / 6.0f;
+                    if (ax > 0.0f)
+                        pset_blend(x, y, RGB(150, 200, 240), ay * ax);
+                }
+            }
+        }
+        /* bubbles rising, wobbling a little on the way up */
+        for (i = 0; i < 14; i++) {
+            float sp = 3.0f + part_p[i][2] * 4.5f;        /* px/s, rising */
+            int32_t y = 150 - (int32_t)wrapf(part_p[i][1] * 152.0f + t * sp, 152.0f);
+            int32_t x = (int32_t)(part_p[i][0] * 232.0f) + 4 +
+                        (int32_t)(3.0f * fm_sinf(t * 0.6f + part_p[i][1] * TWO_PI));
+            int32_t r = part_p[i][3] > 0.5f ? 2 : 1;
+            float a = 0.5f * bright;
+            pset_blend(x - r, y, RGB(190, 224, 248), a);
+            pset_blend(x + r, y, RGB(190, 224, 248), a);
+            pset_blend(x, y - r, RGB(190, 224, 248), a);
+            pset_blend(x, y + r, RGB(190, 224, 248), a * 0.7f);
+        }
+        break;
+    }
+    case SC_FOREST:
+        for (i = 0; i < 16; i++) {
+            int32_t x = (int32_t)(part_p[i][0] * 240.0f +
+                                  15.0f * fm_sinf(t * (0.05f + part_p[i][2] * 0.09f) +
+                                                  part_p[i][1] * TWO_PI));
+            int32_t y = (int32_t)(24.0f + part_p[i][1] * 104.0f +
+                                  10.0f * fm_sinf(t * (0.06f + part_p[i][3] * 0.09f) +
+                                                  part_p[i][2] * TWO_PI));
+            float pu = 0.5f + 0.5f * fm_sinf(t * (0.35f + part_p[i][1] * 0.6f) +
+                                             part_p[i][3] * TWO_PI);
+            float a = pu * pu * 0.95f * bright;
+            pset_blend(x, y, RGB(198, 232, 148), a);
+            if (a > 0.3f)
+                pset_blend(x + 1, y, RGB(198, 232, 148), a * 0.5f);
+        }
+        break;
+    default:                             /* DAWN: the glow is in the rows */
+        break;
+    }
+}
+
+/* sonar: while a SIGNAL ping is young, rings spread from the ping's
+ * place on the keyboard, squashed flat like ripples on water */
+static void draw_sonar(float bright)
+{
+    uint32_t sage;
+    float age;
+    int32_t cx, ring;
+    if (sig_last_freq <= 0.0f || eng_freeze)
+        return;
+    sage = (uint32_t)sample_now - sig_last_at;
+    if (sage >= (uint32_t)(1.8f * SRATE))
+        return;
+    age = (float)sage / SRATE;
+    cx = 8 + nearest_key(sig_last_freq) * 224 / (NKEYS - 1);
+    for (ring = 0; ring < 2; ring++) {
+        float r = (5.0f + age * 58.0f) * (ring ? 0.55f : 1.0f);
+        float a = 0.42f * (1.0f - age / 1.8f) * (ring ? 0.55f : 1.0f) * bright;
+        int32_t steps = 60 + (int32_t)(r * 3.6f), k;
+        if (steps > 480)
+            steps = 480;
+        for (k = 0; k < steps; k++) {
+            float th = (float)k * TWO_PI / (float)steps;
+            pset_blend(cx + (int32_t)(r * fm_cosf(th)),
+                       104 + (int32_t)(r * 0.60f * fm_sinf(th)),
+                       RGB(190, 226, 250), a);
+        }
+    }
+}
+
+/* the audio ribbon: the output's own level history along the sea's
+ * lower edge, newest at the right; a soft dot flashes where the last
+ * key voice spoke */
+static void draw_ribbon(float bright)
+{
+    const uint16_t fg = RGB(168, 216, 238);
+    int32_t x;
+    for (x = 0; x < 240; x++) {
+        float v = lvl_hist[(lvl_head + (uint32_t)x) % LVL_N];
+        int32_t h = (int32_t)(v * 44.0f), y;
+        if (h > 13)
+            h = 13;
+        for (y = 147 - h; y < 147; y++)
+            pset_blend(x, y, fg, (y == 147 - h ? 0.85f : 0.30f) * bright);
+        pset_blend(x, 148, fg, 0.20f * bright);
+    }
+    if (vis_blip_key >= 0) {
+        uint32_t age = plat_ms() - vis_blip_at;
+        if (age < 900u) {
+            float a = (1.0f - (float)age / 900.0f) * 0.8f * bright;
+            int32_t bx = 8 + vis_blip_key * 224 / (NKEYS - 1), dx, dy;
+            for (dy = -1; dy <= 1; dy++)
+                for (dx = -1; dx <= 1; dx++)
+                    pset_blend(bx + dx, 138 + dy, RGB(232, 245, 255),
+                               a * ((dx == 0 && dy == 0) ? 1.0f : 0.45f));
+            pset_blend(bx, 143, RGB(232, 245, 255), a * 0.5f);
+        }
+    }
+}
+
 /* one gradient row: lerp the scene's two colours, wave-shaded, with the
  * swell's bright band drifting through */
 static uint16_t grad_row(const scene_t *sc, int y, int h, uint32_t now, float swell01)
@@ -2416,7 +2691,7 @@ static void draw_mixer(void)
     cv_blit(0, 150);
     cv_begin(240, 44, C_BLACK);
     cv_text(10, 2, &FONT_XS, "KNOBS: VOLUME  MUTE: FX SEL ENV LFO", C_GRAY);
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
     cv_text(178, 24, &FONT_XS, "EDIT:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2452,7 +2727,7 @@ static void draw_fx(void)
         x = cv_text(x + 12, 2, &FONT_XS, "FLFO", C_GRAY);
         cv_text(x + 4, 2, &FONT_XS, (set.flfo & 1u) ? "ON" : "OFF", (set.flfo & 1u) ? C_HI : C_GRAY);
     }
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
     cv_text(140, 24, &FONT_XS, "ENV:BANK FX:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2469,30 +2744,65 @@ static void draw(void)
         draw_fx();
         return;
     }
-    float swell01 = 0.5f + 0.5f * fm_sinf(TWO_PI * swell_ph);
     int y;
-    /* the slow gradient sea */
+    float bright, t;
+    /* v0.4.2: the visual clock - it stops under FREEZE, so the whole
+     * sea holds; the swell reading is only refreshed while unfrozen,
+     * and the frost glides in and out on its own slow blend */
+    {
+        uint32_t dt = now - vis_last;
+        vis_last = now;
+        if (dt > 400u)
+            dt = 400u;
+        if (!eng_freeze) {
+            vis_t += dt;
+            vis_swell = 0.5f + 0.5f * fm_sinf(TWO_PI * swell_ph);
+        }
+        vis_frost += ((eng_freeze ? 1.0f : 0.0f) - vis_frost) * 0.18f;
+        if (!eng_freeze && vis_frost < 0.02f)
+            vis_frost = 0.0f;
+    }
+    bright = ((set.feat >> 3) & 1u) ? 1.3f : 1.0f;   /* STAGE lifts the light a little */
+    t = (float)vis_t / 1000.0f;
+    /* the gradient sea, with DAWN's horizon glow and the FREEZE frost
+     * folded into the rows (rowcol is kept: the life on top blends
+     * against it) */
     cv_begin(240, 150, sc->col_top);
-    for (y = 0; y < 150; y++)
-        cv_rect(0, y, 240, 1, grad_row(sc, y, 150, now, swell01));
+    for (y = 0; y < 150; y++) {
+        uint16_t c = grad_row(sc, y, 150, vis_t, vis_swell);
+        if (set.scene == SC_DAWN) {
+            float dy = ((float)y - 104.0f) / 17.0f;
+            c = col_blend(c, RGB(255, 166, 88),
+                          fm_expf(-dy * dy) * (0.16f + 0.42f * vis_swell));
+        }
+        if (vis_frost > 0.0f) {
+            float edge = (y < 14) ? (14 - y) / 14.0f :
+                         (y > 136) ? ((float)y - 136.0f) / 14.0f : 0.0f;
+            c = col_blend(c, RGB(172, 202, 228), vis_frost * (0.26f + 0.30f * edge));
+        }
+        rowcol[y] = c;
+        cv_rect(0, y, 240, 1, c);
+    }
+    draw_orb(vis_swell, bright);
+    draw_particles(t, bright);
+    draw_sonar(bright);
+    draw_ribbon(bright);
     cv_blit(0, 0);
     /* the scene and the state */
     cv_begin(240, 46, C_BLACK);
     if (msg_showing(now)) {
         int32_t x = cv_text(10, 8, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 8, &FONT_B, ui.msg[1], C_HI);
-        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
+        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
     } else {
         int32_t x = cv_text(10, 8, &FONT_B, sc->name, C_WHITE);
         x = cv_text(x + 10, 8, &FONT_B, eng_hold ? "HOLD" : eng_playing ? "" : "STOPPED",
                     eng_hold ? C_HI : C_GRAY);
-        /* a beacon is sounding: a quiet SIG tag while it lasts (~1.2 s) */
-        if (sig_last_freq > 0.0f &&
-            (uint32_t)sample_now - sig_last_at < (uint32_t)(1.2f * SRATE))
-            cv_text(x + 10, 8, &FONT_B, "SIG", C_HI);
+        /* v0.4.2: a sounding beacon no longer gets a SIG tag here -
+         * it draws sonar rings on the sea instead (draw_sonar) */
         /* v0.3/v0.4: the live states ride the footer line */
         {
-            int32_t x2 = cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
+            int32_t x2 = cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
             if (eng_freeze)
                 x2 = cv_text(x2 + 8, 32, &FONT_XS, "FRZ", C_HI);
             if (set.feat & 1u)
@@ -2535,6 +2845,11 @@ void app_ui_init(void)
     ui.arp_led_key = -1;
     ui.arp_dir = 1;
     ui.redraw = 1;
+    vis_t = 0;                               /* v0.4.2: the visual clock starts here */
+    vis_last = plat_ms();
+    vis_swell = 0.5f;
+    vis_frost = 0.0f;
+    part_scene = -1;
 }
 
 void app_frame(void)
@@ -2547,7 +2862,9 @@ void app_frame(void)
         ui.msg_until = 0;
         ui.redraw = 1;
     }
-    if (now - ui.last_draw >= 160u)          /* the gradient moves slowly */
+    if (now - ui.last_draw >= 100u)          /* v0.4.2: 100 ms - the sea's life
+                                              * (orb, particles, sonar) wants
+                                              * a little more than 160 ms gave */
         ui.redraw = 1;
     if (ui.redraw) {
         ui.redraw = 0;
@@ -2615,6 +2932,15 @@ void app_host_reboot(void)
     dec_pos = 0;
     for (i = 0; i < 4; i++)
         eng_lvl[i] = 0.0f;
+    memset((void *)lvl_hist, 0, sizeof lvl_hist);   /* v0.4.2: the ribbon's history */
+    lvl_head = 0;
+    vis_t = 0;                               /* v0.4.2: the visual clock and its state */
+    vis_last = 0;
+    vis_swell = 0.5f;
+    vis_frost = 0.0f;
+    part_scene = -1;
+    vis_blip_key = -1;
+    vis_blip_at = 0;
     memset(flt_lp_ic, 0, sizeof flt_lp_ic);
     memset(flt_hp_ic, 0, sizeof flt_hp_ic);
     sample_now = 0;

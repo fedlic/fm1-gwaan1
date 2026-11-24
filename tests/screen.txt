@@ -1,0 +1,53 @@
+# GWAAN-1 v0.4.2: the living screen - one screenshot per scene, a
+# sonar moment, and the FREEZE frost. The sonar section runs first, on
+# the exact prefix its ping timing was probed with: the sim is
+# deterministic, so the ring is up when the shot lands.
+wait 600
+master 4096
+turn PRESET 1
+wait 200
+turn PRESET 1
+wait 200
+turn PRESET 1
+wait 200
+expect scene 3
+turn K4 22
+wait 100
+expect k4 127
+wait 9600
+shot scr_sonar.png
+wait 2200
+shot scr_stars.png
+# DAWN: the horizon glow
+turn PRESET 1
+wait 100
+expect scene 4
+wait 2400
+shot scr_dawn.png
+# DEEP: bubbles and light rays
+turn PRESET 1
+wait 100
+expect scene 0
+wait 2400
+shot scr_deep.png
+# FOREST: fireflies
+turn PRESET 1
+wait 2500
+shot scr_forest.png
+# RAIN: streaks
+turn PRESET 1
+wait 2500
+shot scr_rain.png
+# back to DEEP for the frost
+turn PRESET 1
+wait 100
+turn PRESET 1
+wait 100
+turn PRESET 1
+wait 100
+expect scene 0
+tap GLO
+wait 100
+expect freeze 1
+wait 1700
+shot scr_freeze.png
