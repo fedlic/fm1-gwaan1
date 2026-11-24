@@ -18,6 +18,14 @@
  * the same glide), REVERSE ECHO and STEREO WIDE (FX page B), and USB
  * MIDI: scale-snapped note input plus CC control of the main parameters.
  *
+ * v0.4.1: a full audit + refactor (no intended sound changes beyond the
+ * fixes): the keyboard release really melts over ~6 s (it was a ~0.6 s
+ * tau), MIDI notes snap on the drone's own pitches and can no longer
+ * be stranded by a scene change, REV ECHO really plays backwards, the
+ * saved-state validation is closed (snapshots, mixer, arp pattern),
+ * PLAY's stop also drains the wet tail, and the tuning constants and
+ * layout facts live in named, asserted places below.
+ *
  * Layers, generated from power-on:
  *   MIHYON - an FM voice whose modulator pitch glides slowly (seconds-long
  *            cycles), so the harmonics sweep and wail, gently.
@@ -30,13 +38,29 @@
  *            tones in short morse-like patterns, pitched from the field,
  *            washed in space. KNOB4's upper travel brings them in.
  * The panel is four wide-sweet-spot knob macros (glide / depth / space /
- * drift) plus POKE-1 v0.1.1's SELECT main-filter curve. Everything is
- * smoothed, and a soft saturator + limiter keep the ceiling: the gentle-
- * stimulation design is a hard requirement - it never turns harsh. */
+ * drift) plus the resonant SELECT main filter (v0.2.1: a two-stage TPT
+ * state-variable cascade, not a tone tilt). Everything is smoothed, and
+ * a soft saturator + limiter keep the ceiling: the gentle-stimulation
+ * design is a hard requirement - it never turns harsh. */
 #include "fastmath.h"
+#include <stddef.h>
 
 #define SRATE 44100.0f
 #define TWO_PI 6.2831853f
+
+/* ------------------------------------------------------------- tuning ----- */
+/* The keyboard voice's envelope. v0.4.1: the release coefficient was
+ * 0.000038 (tau ~0.60 s, the voice gone in ~3 s) while the comment and
+ * the manual promised a ~6 s melt - a digit slipped. KEY_REL_C gives
+ * tau ~1.19 s: -20 dB at ~2.7 s, fully off at ~5.9 s. */
+#define KEY_ATK_C 0.0012f        /* held: the level's glide up, tau ~19 ms */
+#define KEY_REL_C 0.000019f      /* released: tau ~1.19 s, ~6 s to silence */
+#define KEY_LEVEL 0.17f          /* a held note's sustain level (x velocity) */
+#define KEY_OFF 0.0012f          /* below this a releasing voice is freed */
+#define MIH_ENV_TAU 4.5f         /* the mihyon voices' decay tau, seconds */
+#define DROP_ENV_TAU 0.9f        /* the water drops' decay tau, seconds */
+#define ECHO_FB_MAX 0.82f        /* the echo feedback's hard cap */
+#define LIM_CEIL 0.55f           /* the limiter's ceiling (before the x1.6 staging) */
 
 /* ----------------------------------------------------------------- scenes --- */
 typedef struct {
@@ -93,22 +117,26 @@ typedef struct {
     uint8_t freeze;
 } snap_t;                                /* 22 bytes */
 
-/* The first 16 bytes are v0.1..v0.2.1's layout, byte-identical; the v0.3
- * and v0.4 blocks are appended and loaded in stages (POKE-1's scheme):
- * an older blob loads with the newer blocks at neutral defaults. */
+/* The settings blob is loaded in stages by LENGTH (POKE-1's scheme):
+ * a v0.1/v0.2 blob is 16 bytes (through k4, padded), a v0.3 blob is 28
+ * (the mixer/FX block), a v0.4 blob is the full 124. An older blob
+ * loads with the newer blocks at neutral defaults. Field offsets:
+ * mix at 13, the v0.4 block at 25, the snapshots at 32 - asserted
+ * below, because a future append that trusts anything else breaks
+ * every saved settings blob in the field. */
 typedef struct {
     uint32_t magic;
     uint8_t scene, playing, rsv0, rsv1;
     int8_t sel;                          /* SELECT detents, -48..48 */
     uint8_t k1, k2, k3, k4;              /* the knob macros, 0..127 */
-    /* ---- v0.3 extension (bytes 16..27) ---- */
+    /* ---- v0.3 extension (offsets 13..24) ---- */
     uint8_t mix[4];                      /* layer volumes: MIHYON GUWAAN AIR SIGNAL */
     uint8_t mute;                        /* bit i: layer i muted */
     uint8_t feat;                        /* bit0 arp on, bits1-2 arp pattern, bit3 stage LEDs */
     uint8_t arp_rate, arp_gate;          /* 0..127 */
     uint8_t shimmer, crush;              /* the FX page's amounts, 0..127 */
     uint8_t rsv[2];
-    /* ---- v0.4 extension (bytes 28..124) ---- */
+    /* ---- v0.4 extension (offsets 25..123) ---- */
     uint8_t revecho, wide;               /* the FX-B page's amounts, 0..127 */
     uint8_t flfo;                        /* bit0: the filter LFO is on */
     uint8_t flfo_dep, flfo_rate;         /* 0..127 */
@@ -118,6 +146,11 @@ typedef struct {
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;
+
+_Static_assert(sizeof(settings_t) == 124, "the settings blob is 124 bytes");
+_Static_assert(offsetof(settings_t, mix) == 13, "the v0.3 block starts at 13");
+_Static_assert(offsetof(settings_t, revecho) == 25, "the v0.4 block starts at 25");
+_Static_assert(offsetof(settings_t, snap) == 32, "the snapshots start at 32");
 
 static void settings_ext_defaults(void)  /* the v0.3 block, neutral */
 {
@@ -171,13 +204,39 @@ static void settings_load(void)
         settings_defaults();
         return;
     }
-    if (n < 28 || set.mute > 15u || set.feat > 15u || set.arp_rate > 127u ||
-        set.arp_gate > 127u || set.shimmer > 127u || set.crush > 127u)
+    if (n < 28 || set.mute > 15u || set.feat > 15u || ((set.feat >> 1) & 3u) > 2u ||
+        set.mix[0] > 127u || set.mix[1] > 127u || set.mix[2] > 127u || set.mix[3] > 127u ||
+        set.arp_rate > 127u || set.arp_gate > 127u || set.shimmer > 127u || set.crush > 127u)
         settings_ext_defaults();         /* a v0.2.x blob, or a corrupt v0.3 block */
     if (n < (int32_t)sizeof set || set.revecho > 127u || set.wide > 127u ||
         set.flfo > 1u || set.flfo_dep > 127u || set.flfo_rate > 127u ||
         set.snap_sel > 3u || set.snap_used > 15u)
         settings_ext4_defaults();        /* a v0.3 blob, or a corrupt v0.4 block */
+    {   /* v0.4.1: the snapshot payloads are validated too (they never
+         * were): an out-of-range slot is dropped - its used bit
+         * cleared - never recalled. A recalled k1 of 255 would drive
+         * the glide period negative; a pattern of 3 would index past
+         * ARP_PATN. The live fields above reset their whole block on
+         * corruption; a slot only loses itself. */
+        int i, j;
+        for (i = 0; i < 4; i++) {
+            snap_t *d = &set.snap[i];
+            int bad = d->scene >= NSCENE || d->sel < -48 || d->sel > 48 ||
+                      d->k1 > 127u || d->k2 > 127u || d->k3 > 127u || d->k4 > 127u ||
+                      d->mute > 15u || ((d->feat3 >> 1) & 3u) > 2u ||
+                      d->arp_rate > 127u || d->arp_gate > 127u ||
+                      d->shimmer > 127u || d->crush > 127u ||
+                      d->revecho > 127u || d->wide > 127u ||
+                      d->flfo > 1u || d->flfo_dep > 127u || d->flfo_rate > 127u ||
+                      d->freeze > 1u;
+            for (j = 0; j < 4 && !bad; j++)
+                bad = d->mix[j] > 127u;
+            if (bad) {
+                memset(d, 0, sizeof *d);
+                set.snap_used &= (uint8_t)~(1u << i);
+            }
+        }
+    }
 }
 
 /* ------------------------------------------------------------------- RNG ---- */
@@ -288,6 +347,13 @@ typedef struct {
 static keyv_t keyv[NKEYV];
 static volatile uint32_t keys_down;      /* the panel keys, from the UI */
 
+/* v0.4.1: MIDI note tracking (see midi_note_on for the why): the
+ * snapped pitch remembered per input note, a hold count per input,
+ * and a reference count per snapped pitch. Declared here because
+ * app_init (below) and arp_set's handover both use them. */
+static int8_t in_snap[128];
+static uint8_t in_cnt[128], sn_ref[128];
+
 /* water drops (and, at high pitch, the K4 shimmer pings) */
 #define NDROP 3
 typedef struct {
@@ -372,10 +438,18 @@ static float crush_val;
 static uint32_t crush_cnt;
 
 /* REVERSE ECHO (v0.4): the post-filter signal is recorded into a ring;
- * two Hann-windowed grains play the last ~0.5 s backwards into the wet
- * path, so echoes bloom in reverse. int16 in the pool: 48,510 B. */
+ * two Hann-windowed grains play the ring backwards into the wet path,
+ * so echoes bloom in reverse. int16 in the pool: 48,510 B.
+ * v0.4.1: the grains really do run backwards now. Each head's read
+ * index is rev_pos - 2*age: the write head advances +1 while the head's
+ * phase advances +1, so the read point moves -1 per sample through the
+ * segment that ended when its grain began. (v0.4 read at rev_pos - age:
+ * relative velocity zero - the "echo" was two held sample values being
+ * crossfaded.) The grain is 12,000 samples (~0.27 s): a backwards grain
+ * spans 2*GRAIN of ring history, and 2*12000 stays inside REV_LEN with
+ * margin, so a grain's segment is never overwritten mid-play. */
 #define REV_LEN 24255                    /* 0.55 s at 44.1 kHz */
-#define REV_GRAIN 22207.0f               /* REV_LEN - 2048, as a float */
+#define REV_GRAIN 12000.0f               /* ~0.27 s; 2*REV_GRAIN < REV_LEN */
 static int16_t rev_buf[REV_LEN] __attribute__((aligned(4))) PLAT_POOL;
 static uint32_t rev_pos;
 static float rev_age;                    /* the grain age, in samples */
@@ -569,8 +643,18 @@ static void schedule(void)                   /* in the render, once per block */
 {
     const scene_t *sc = &SCENE[set.scene];
     uint32_t now = (uint32_t)sample_now;
-    if (!eng_playing)
+    if (!eng_playing) {
+        /* v0.4.1: keep the clocks armed while stopped. They used to
+         * freeze where they were, and after ~13.5 h stopped (2^31
+         * samples) the int32 comparisons wrapped - the engine then
+         * stayed silent for hours after PLAY resumed. */
+        next_mih_at = now + (uint32_t)SRATE;
+        next_drop_at = now + (uint32_t)SRATE;
+        next_drift_at = now + (uint32_t)SRATE;
+        next_sig_at = now + (uint32_t)SRATE;
+        sig_left = 0;
         return;
+    }
     if ((int32_t)(now - next_mih_at) >= 0) {
         next_mih_at = now + (uint32_t)((4.0f + rng_f() * 5.0f) * SRATE);
         mih_start();
@@ -754,14 +838,15 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (m->ph >= 1.0f)
                 m->ph -= 1.0f;
             env = m->age < m->atk ? (float)m->age / (float)m->atk
-                                  : fm_expf(-(float)(m->age - m->atk) / (4.5f * SRATE));
+                                  : fm_expf(-(float)(m->age - m->atk) / (MIH_ENV_TAU * SRATE));
             if (m->age > m->atk && env < 0.0012f) {
                 m->on = 0;
                 continue;
             }
             s_mih += fm_sinf(TWO_PI * m->ph + 2.6f * env * fm_sinf(TWO_PI * m->mph)) * env * m->peak * ans_amp;
         }
-        /* the keyboard: held notes sustain, released notes melt (tau ~6 s) */
+        /* the keyboard: held notes sustain, released notes melt
+         * (KEY_REL_C: tau ~1.19 s, so the melt lasts ~6 s in all) */
         for (v = 0; v < NKEYV; v++) {
             keyv_t *kv = &keyv[v];
             float tgt;
@@ -773,9 +858,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             kv->ph += kv->freq / SRATE;
             if (kv->ph >= 1.0f)
                 kv->ph -= 1.0f;
-            tgt = kv->st == 1 ? 0.17f * kv->vel : 0.0f;
-            kv->level += (tgt - kv->level) * (kv->st == 1 ? 0.0012f : 0.000038f);
-            if (kv->st == 2 && kv->level < 0.0012f) {
+            tgt = kv->st == 1 ? KEY_LEVEL * kv->vel : 0.0f;
+            kv->level += (tgt - kv->level) * (kv->st == 1 ? KEY_ATK_C : KEY_REL_C);
+            if (kv->st == 2 && kv->level < KEY_OFF) {
                 kv->st = 0;
                 continue;
             }
@@ -805,7 +890,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             d->ph += d->f / SRATE;
             if (d->ph >= 1.0f)
                 d->ph -= 1.0f;
-            env = fm_expf(-(float)d->age / (0.9f * SRATE));
+            env = fm_expf(-(float)d->age / (DROP_ENV_TAU * SRATE));
             if (env < 0.0012f) {
                 d->on = 0;
                 continue;
@@ -919,7 +1004,13 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         echo_lp += 0.38f * (echo_out - echo_lp);
         /* v0.4: a second tap, half the delay away - the width's far side */
         echo_lp2 += 0.38f * (echo_buf[(echo_pos + ECHO_LEN / 2) % ECHO_LEN] - echo_lp2);
-        echo_buf[echo_pos] = out * TGT.echo_send + echo_lp * (TGT.echo_fb > 0.82f ? 0.82f : TGT.echo_fb);
+        /* v0.4.1: the feedback also scales with eng_gain (the PLAY
+         * gate), so stopping PLAY drains the tail within ~1 s instead
+         * of letting the wash ring on for seconds; while playing,
+         * eng_gain is 1 and nothing changes. Keys played while stopped
+         * still feed the echo - their send is untouched. */
+        echo_buf[echo_pos] = out * TGT.echo_send +
+            echo_lp * (TGT.echo_fb > ECHO_FB_MAX ? ECHO_FB_MAX : TGT.echo_fb) * eng_gain;
         echo_pos = (echo_pos + 1u) % ECHO_LEN;
         /* SHIMMER (v0.3): the dry signal fills the granular line every
          * sample, so the octave-up send is always primed */
@@ -927,9 +1018,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         shim_pos = (shim_pos + 1u) & (SHIM_LEN - 1u);
         wet = out + echo_lp * 0.5f;
         wetR = out + (echo_lp * (1.0f - SM.wide) + echo_lp2 * SM.wide) * 0.5f;
-        /* REVERSE ECHO (v0.4): the post-filter signal is recorded into a
-         * ring; two Hann grains play the last ~0.5 s backwards, blooming
-         * into the wet path ahead of the reverb. */
+        /* REVERSE ECHO: the post-filter signal is recorded into a ring;
+         * two Hann grains play it backwards (see the REV_GRAIN note),
+         * blooming into the wet path ahead of the reverb. */
         {
             float q = out > 1.3f ? 1.3f : out < -1.3f ? -1.3f : out;
             rev_buf[rev_pos] = (int16_t)(q * 24000.0f);
@@ -946,10 +1037,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 a2 -= REV_GRAIN;
             g1 = 0.5f - 0.5f * fm_cosf(TWO_PI * rev_age / REV_GRAIN);
             g2 = 0.5f - 0.5f * fm_cosf(TWO_PI * a2 / REV_GRAIN);
-            ix1 = (int32_t)rev_pos - (int32_t)rev_age;
+            /* read index = write head - 2*phase: -1 sample per sample
+             * through the grain's segment (v0.4.1; was - phase, which
+             * stood still). |index| < 2*REV_GRAIN < REV_LEN, so one
+             * conditional add unwraps it. */
+            ix1 = (int32_t)rev_pos - (int32_t)(2.0f * rev_age);
             if (ix1 < 0)
                 ix1 += REV_LEN;
-            ix2 = (int32_t)rev_pos - (int32_t)a2;
+            ix2 = (int32_t)rev_pos - (int32_t)(2.0f * a2);
             if (ix2 < 0)
                 ix2 += REV_LEN;
             ro = ((float)rev_buf[ix1] * g1 + (float)rev_buf[ix2] * g2) * (1.0f / 24000.0f);
@@ -957,9 +1052,16 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             wetR += ro * SM.revecho * 0.8f;
         }
         /* reverb: 4 combs + 2 allpasses (Schroeder). It also runs for the
-         * shimmer send alone, so SHIMMER still speaks with SPACE at zero. */
-        if (TGT.rev_send > 0.01f || SM.shim > 0.003f) {
+         * shimmer send alone, so SHIMMER still speaks with SPACE at zero.
+         * v0.4.1: it now runs unconditionally - the old gate froze the
+         * comb state whenever SPACE hit zero, and the stale tail came
+         * back when SPACE returned. With no input the combs decay to
+         * silence on their own (and flush to zero, below). The comb
+         * feedback also scales with eng_gain, like the echo's, so a
+         * PLAY stop drains the tail instead of ringing on. */
+        {
             float rin = wet * TGT.rev_send * 0.42f;
+            float comb_fb = 0.62f * (0.35f + 0.65f * eng_gain);
             if (SM.shim > 0.003f) {
                 /* two double-speed heads, Hann-windowed half a window
                  * apart: a continuous octave-up copy of the dry signal */
@@ -986,7 +1088,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             for (c = 0; c < 4; c++) {
                 uint32_t p = comb_pos[c];
                 float y = comb_buf[c][p];
-                comb_buf[c][p] = rin + y * 0.62f;
+                float nv = rin + y * comb_fb;
+                if (nv < 1e-18f && nv > -1e-18f)
+                    nv = 0.0f;           /* no denormal crawl in the tail */
+                comb_buf[c][p] = nv;
                 comb_pos[c] = (p + 1u) % COMB_LEN[c];
                 rev += y;
             }
@@ -1028,6 +1133,11 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 float fr;
                 while (rp < 0.0f)
                     rp += 32.0f;
+                if (rp >= 32.0f)
+                    rp -= 32.0f;   /* v0.4.1: float rounding can land rp
+                                    * exactly on 32.0f as SM.wide decays
+                                    * through ~1e-7 - i0 would read one
+                                    * float past the ring */
                 i0 = (uint32_t)rp;
                 fr = rp - (float)i0;
                 wetR = dec_buf[i0] * (1.0f - fr) + dec_buf[(i0 + 1u) & 31u] * fr;
@@ -1036,8 +1146,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             oL = fm_tanhf(wet * 0.9f);
             oR = fm_tanhf(wetR * 0.9f);
             m = fm_fabsf(oL) > fm_fabsf(oR) ? fm_fabsf(oL) : fm_fabsf(oR);
-            if (m * SM.lim > 0.55f)
-                SM.lim = 0.55f / m;
+            if (m * SM.lim > LIM_CEIL)
+                SM.lim = LIM_CEIL / m;
             else if (SM.lim < 1.0f)
                 SM.lim += (1.0f - SM.lim) * 0.0004f;
             gL = oL * SM.lim * gain_now;
@@ -1154,6 +1264,9 @@ static void params_from_panel(void)
 
 void app_init(void)
 {
+    memset(in_snap, -1, sizeof in_snap);     /* v0.4.1: no MIDI notes held */
+    memset(in_cnt, 0, sizeof in_cnt);
+    memset(sn_ref, 0, sizeof sn_ref);
     settings_load();
     rng_s ^= plat_ms() * 2654435761u ^ 0x9E3779B9u;
     if (!rng_s)
@@ -1430,6 +1543,7 @@ static const char *const ARP_PATN[3] = {"UP", "UP-DOWN", "RANDOM"};
 /* v0.4: the MIDI notes held for the arp (scale-snapped at note-on) */
 static int mn_note[16], mn_n;
 static float mn_freq[16], mn_vel[16];
+static void mn_add(int note, float vel);     /* below, with the MIDI input */
 
 static void mute_toggle(int i)
 {
@@ -1524,6 +1638,14 @@ static void arp_set(int on)
     int i, k;
     if (on) {
         set.feat |= 1u;
+        /* v0.4.1: held MIDI notes join the held set before the handover
+         * melt (v0.4 dropped them: they melted and never came back) */
+        for (i = 0; i < NKEYV; i++)
+            if (keyv[i].st == 1 && keyv[i].key < 0) {
+                int sn = -1 - keyv[i].key;
+                if (sn >= 0 && sn < 128 && sn_ref[sn])
+                    mn_add(sn, keyv[i].vel);
+            }
         for (i = 0; i < NKEYV; i++)          /* hand the notes over: they melt, the arp restarts them */
             if (keyv[i].st == 1)
                 keyv[i].st = 2;
@@ -1548,6 +1670,10 @@ static void arp_set(int on)
             if (!has)
                 key_on(k);
         }
+        /* v0.4.1: and the held MIDI notes go back to direct voices
+         * (v0.4 left them in the set, silent, until their note-off) */
+        for (i = 0; i < mn_n; i++)
+            voice_start(-1 - mn_note[i], mn_freq[i], mn_vel[i]);
         app_say("ARP", "OFF");
     }
     set_dirty = 1;
@@ -1763,15 +1889,21 @@ static void dice_roll(void)
 
 /* ------------------------------------------------------- v0.4: USB MIDI --- */
 /* Notes snap to the scene's scale at note-on (they can never clash with
- * the drone) and play the keyboard voice with their velocity; while the
- * arp is on they join its held set instead. CCs drive the main
- * parameters directly - the number map is in the build report. */
+ * the drone) and play the keyboard voice with their velocity; with the
+ * arp on they ALSO join its held set (v0.4.1 - they used to join it
+ * instead, and a short tap could vanish between steps). CCs drive the
+ * main parameters directly - the number map is in the build report. */
 static float midi_hz(int note) { return 440.0f * fm_exp2f((float)(note - 69) / 12.0f); }
 
 static int snap_midi(int note)
 {
     const scene_t *sc = &SCENE[set.scene];
-    int rm = 69 + (int)(12.0f * fm_log2f(sc->root / 440.0f) + 0.5f);
+    /* v0.4.1: round with fm_floorf, not a cast. Every scene's root is
+     * below A440, so 12*log2(root/440) is negative, and C's cast
+     * truncates toward zero - the old code put rm one semitone high in
+     * all five scenes, and MIDI notes clashed a semitone against the
+     * drone (and against the panel keys, which use key_freq). */
+    int rm = 69 + (int)fm_floorf(12.0f * fm_log2f(sc->root / 440.0f) + 0.5f);
     int best = rm, bd = 1 << 30, o, i, cand, dd;
     for (o = -1; o < 10; o++)
         for (i = 0; i < sc->nsc; i++) {
@@ -1784,7 +1916,9 @@ static int snap_midi(int note)
                 best = cand;
             }
         }
-    return best;
+    /* the fold can reach 128 (note 127 in FOREST/RAIN): as a voice
+     * marker that wrapped to +127 and could never be released */
+    return best > 127 ? 127 : best;
 }
 
 static void mn_add(int note, float vel)
@@ -1816,15 +1950,64 @@ static void mn_del(int note)
         }
 }
 
+/* v0.4.1: MIDI note tracking. v0.4 re-snapped the note number at
+ * note-OFF under whatever scene was current by then - a scene change
+ * (PRESETS, DICE, a recall) between on and off stranded the voice
+ * sounding forever, and two input notes snapping to one pitch shared
+ * a voice that the first note-off killed. Now the snapped pitch is
+ * remembered per input note at note-on, holds are counted (several
+ * channels can hold the same key), and each snapped pitch is
+ * reference-counted: the voice (and its arp-set entry) is released
+ * only when the last holder lets go. in_snap is -1 for a free input;
+ * app_init and app_host_reboot reset all three tables (declared with
+ * the keyboard voices, above). */
+static void midi_note_on(int note, float vel)
+{
+    int sn;
+    if (note < 0 || note > 127)
+        return;
+    if (in_cnt[note]) {                      /* a re-press on another channel */
+        if (in_cnt[note] < 255)
+            in_cnt[note]++;
+        return;
+    }
+    in_cnt[note] = 1;
+    sn = snap_midi(note);
+    in_snap[note] = (int8_t)sn;
+    if (sn_ref[sn]++)
+        return;                              /* the pitch is already held/sounding */
+    if (set.feat & 1u)
+        mn_add(sn, vel);
+    voice_start(-1 - sn, midi_hz(sn), vel);  /* speak at once, arp or not */
+}
+
+static void midi_note_off(int note)
+{
+    int sn;
+    if (note < 0 || note > 127 || !in_cnt[note])
+        return;
+    if (--in_cnt[note])
+        return;
+    sn = in_snap[note];
+    in_snap[note] = -1;
+    if (sn < 0 || sn > 127 || !sn_ref[sn])
+        return;
+    if (--sn_ref[sn])
+        return;                              /* another input still holds this pitch */
+    mn_del(sn);
+    key_off(-1 - sn);
+}
+
 static void midi_cc(int cc, int v)
 {
-    rc.on = 0;                               /* external control wins over a glide */
     switch (cc) {
     case 20: case 21: case 22: case 23:      /* the mixer: MIHYON GUWAAN AIR SIGNAL */
         set.mix[cc - 20] = (uint8_t)v;
         break;
-    case 24:                                 /* SELECT: centre 64 = open */
-        set.sel = (int8_t)clamp((v - 64) * 48 / 64, -48, 48);
+    case 24:                                 /* SELECT: centre 64 = open;
+                                              * v0.4.1: split scale, so 127
+                                              * reaches +48 (it stopped at 47) */
+        set.sel = (int8_t)(v >= 64 ? (v - 64) * 48 / 63 : (v - 64) * 48 / 64);
         break;
     case 25: set.k1 = (uint8_t)v; break;
     case 26: set.k2 = (uint8_t)v; break;
@@ -1856,8 +2039,11 @@ static void midi_cc(int cc, int v)
             arp_set(v >= 64);
         break;
     default:
-        return;
+        return;                              /* v0.4.1: an unhandled CC used to
+                                              * cancel a recall glide too - only
+                                              * a CC this switch handles may */
     }
+    rc.on = 0;                               /* external control wins over a glide */
     set_dirty = 1;
 }
 
@@ -1866,27 +2052,28 @@ static void midi_in(void)
     uint32_t pkt;
     int port;
     while (plat_midi_in(&pkt, &port)) {
-        uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
+        /* v0.4.1: d2 is masked like d1 - a raw byte above 127 used to
+         * flow into the settings (a crush of 200, an arp gate of 255)
+         * and then fail the next boot's validation, wiping the block */
+        uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = (pkt >> 24) & 0x7Fu;
         if ((st & 0xF0u) == 0xB0u) {
             midi_cc((int)d1, (int)d2);
         } else if ((st & 0xF0u) == 0x90u && d2) {
-            int sn = snap_midi((int)d1);
-            if (set.feat & 1u)
-                mn_add(sn, (float)d2 / 127.0f);
-            else
-                voice_start(-1 - sn, midi_hz(sn), (float)d2 / 127.0f);
+            midi_note_on((int)d1, (float)d2 / 127.0f);
         } else if ((st & 0xF0u) == 0x80u || ((st & 0xF0u) == 0x90u && !d2)) {
-            int sn = snap_midi((int)d1);
-            mn_del(sn);
-            if (!(set.feat & 1u))
-                key_off(-1 - sn);
+            midi_note_off((int)d1);
         }
     }
 }
 
 static void scene_goto(int idx)
 {
-    int old = slot_cur, nw = 1 - slot_cur;
+    /* v0.4.1: the new scene takes the QUIETER slot. v0.4 always took
+     * the non-current one, so a scene change made mid-crossfade
+     * retuned a slot that was still plainly audible - its oscillators
+     * jumped pitch under the listener. In the steady state the quiet
+     * slot IS the non-current one, so nothing changes there. */
+    int nw = slot[0].g <= slot[1].g ? 0 : 1, old = 1 - nw;
     set.scene = (uint8_t)idx;
     slot_assign(nw, 0);                      /* the new scene's first field fades in */
     slot[nw].tgt = 1.0f;
@@ -1897,9 +2084,12 @@ static void scene_goto(int idx)
     ui.redraw = 1;
 }
 
-static void scene_change(int dir)
+static void scene_change(int dir)            /* dir: detents, either sign (v0.4.1) */
 {
-    scene_goto((set.scene + (dir > 0 ? 1 : NSCENE - 1)) % NSCENE);
+    int ns = ((int)set.scene + dir) % NSCENE;
+    if (ns < 0)
+        ns += NSCENE;
+    scene_goto(ns);
     app_say("SCENE", SCENE[set.scene].name);
 }
 
@@ -1909,7 +2099,13 @@ static void input(void)
     int32_t e;
     keys_down = keys;
     midi_in();                               /* v0.4: USB MIDI notes and CCs */
-    if (!(set.feat & 1u)) {                  /* the fingers own the keys (while the arp is off) */
+    {   /* the fingers always own the key edges (v0.4.1). With the arp
+         * on, a press still speaks at once - key_on IS voice_start, and
+         * the arp steps the held keys on top; v0.4 read the keys only
+         * at step time, so a tap shorter than a step (up to 6 s at the
+         * slowest rate) could vanish without a sound. A release melts
+         * the voice even mid-gate: key_off on a voice the arp already
+         * gated off is a no-op. */
         for (k = 0; k < NKEYS; k++) {
             uint32_t bit = 1u << k;
             if ((keys & bit) && !(ui.keys & bit))
@@ -2081,6 +2277,9 @@ static void input(void)
     for (k = 0; k < NE; k++) {
         if ((e = plat_enc((int)k)) == 0)
             continue;
+        e = clamp(e, -64, 64);               /* v0.4.1: bound the batch - the
+                                              * e*4 steps below could overflow
+                                              * on an extreme (host-fed) delta */
         rc.on = 0;                           /* v0.4: a hand on a knob cancels the recall glide */
         ui.turns[k] += e;
         ui.redraw = 1;
@@ -2089,12 +2288,16 @@ static void input(void)
             set.sel = (int8_t)clamp(set.sel + e * 4, -48, 48);
             set_dirty = 1;
             break;
-        case EN_PRESET:                      /* the scene */
+        case EN_PRESET:                      /* the scene: one step per detent (v0.4.1) */
             scene_change(e);
             break;
-        case EN_ALGO:                        /* a manual step to the next chord field */
+        case EN_ALGO:                        /* manual steps to the next chord fields */
             if (!eng_hold) {
-                field_advance();
+                int ast = e < 0 ? -e : e, ai;
+                if (ast > 4)
+                    ast = 4;                 /* a fast spin still lands somewhere sane */
+                for (ai = 0; ai < ast; ai++)
+                    field_advance();
                 app_say("FIELD", "");
             }
             break;
@@ -2183,10 +2386,17 @@ static void prow(int32_t ly, int32_t by, const char *name, uint8_t v, int muted)
     cv_text(192, ly, &FONT_XS, num, C_WHITE);
 }
 
+/* the message timer, wrap-safe (v0.4.1): a plain now < msg_until
+ * comparison breaks across the 49.7-day plat_ms wrap */
+static int msg_showing(uint32_t now)
+{
+    return ui.msg_until && (int32_t)(ui.msg_until - now) > 0;
+}
+
 static void page_title(const char *t)
 {
     uint32_t now = plat_ms();
-    if (now < ui.msg_until) {
+    if (msg_showing(now)) {
         int32_t x = cv_text(10, 6, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 6, &FONT_B, ui.msg[1], C_HI);
     } else
@@ -2206,7 +2416,7 @@ static void draw_mixer(void)
     cv_blit(0, 150);
     cv_begin(240, 44, C_BLACK);
     cv_text(10, 2, &FONT_XS, "KNOBS: VOLUME  MUTE: FX SEL ENV LFO", C_GRAY);
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
     cv_text(178, 24, &FONT_XS, "EDIT:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2242,7 +2452,7 @@ static void draw_fx(void)
         x = cv_text(x + 12, 2, &FONT_XS, "FLFO", C_GRAY);
         cv_text(x + 4, 2, &FONT_XS, (set.flfo & 1u) ? "ON" : "OFF", (set.flfo & 1u) ? C_HI : C_GRAY);
     }
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
     cv_text(140, 24, &FONT_XS, "ENV:BANK FX:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2268,10 +2478,10 @@ static void draw(void)
     cv_blit(0, 0);
     /* the scene and the state */
     cv_begin(240, 46, C_BLACK);
-    if (now < ui.msg_until) {
+    if (msg_showing(now)) {
         int32_t x = cv_text(10, 8, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 8, &FONT_B, ui.msg[1], C_HI);
-        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4", C_GRAY);
+        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
     } else {
         int32_t x = cv_text(10, 8, &FONT_B, sc->name, C_WHITE);
         x = cv_text(x + 10, 8, &FONT_B, eng_hold ? "HOLD" : eng_playing ? "" : "STOPPED",
@@ -2282,7 +2492,7 @@ static void draw(void)
             cv_text(x + 10, 8, &FONT_B, "SIG", C_HI);
         /* v0.3/v0.4: the live states ride the footer line */
         {
-            int32_t x2 = cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4", C_GRAY);
+            int32_t x2 = cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.1", C_GRAY);
             if (eng_freeze)
                 x2 = cv_text(x2 + 8, 32, &FONT_XS, "FRZ", C_HI);
             if (set.feat & 1u)
@@ -2333,7 +2543,7 @@ void app_frame(void)
     input();
     if (ann_on())
         ann_tick(now);
-    if (ui.msg_until && now >= ui.msg_until) {
+    if (ui.msg_until && !msg_showing(now)) {
         ui.msg_until = 0;
         ui.redraw = 1;
     }
@@ -2347,6 +2557,81 @@ void app_frame(void)
 }
 
 #ifdef PLAT_HOST
+/* v0.4.1: a sim reboot now forgets the runtime, like a real power
+ * cycle - v0.4 leaked it (FREEZE stayed on, voices kept sounding,
+ * counters kept counting), so the persistence tests proved less than
+ * they claimed. Everything app_init does not itself reset is zeroed
+ * here; app_init then re-derives the rest from the saved settings.
+ * Known residue: app_render's and knob_answers' function-local
+ * statics (the glide gains, the answer phases) survive - sub-second
+ * smoothing state, inaudible across a boot. */
+void app_host_reboot(void)
+{
+    int i;
+    set_dirty = 0;
+    rc.on = 0;
+    memset(slot, 0, sizeof slot);
+    slot_cur = 0;
+    field_left = 0;
+    eng_hold = 0;
+    sub_freq = 0.0f;
+    swell_ph = 0.0f;
+    memset(mih, 0, sizeof mih);
+    memset(keyv, 0, sizeof keyv);
+    keys_down = 0;
+    memset(in_snap, -1, sizeof in_snap);
+    memset(in_cnt, 0, sizeof in_cnt);
+    memset(sn_ref, 0, sizeof sn_ref);
+    memset(drop, 0, sizeof drop);
+    memset(sigv, 0, sizeof sigv);
+    next_sig_at = next_ping_at = 0;
+    sig_left = 0;
+    sig_pat_freq = 0.0f;
+    sig_pings = sig_pats = 0;
+    sig_last_at = 0;
+    sig_last_freq = 0.0f;
+    body_ph = body3_ph = body2_ph = 0.0f;
+    air_lp = air_hp = air_am_ph = 0.0f;
+    memset(echo_buf, 0, sizeof echo_buf);
+    echo_pos = 0;
+    echo_lp = echo_lp2 = 0.0f;
+    memset(comb_buf, 0, sizeof comb_buf);
+    memset(ap_buf, 0, sizeof ap_buf);
+    memset(comb_pos, 0, sizeof comb_pos);
+    memset(ap_pos, 0, sizeof ap_pos);
+    memset(frz_buf, 0, sizeof frz_buf);
+    frz_pos = 0;
+    frz_p = 0.0f;
+    eng_freeze = 0;
+    memset(shim_buf, 0, sizeof shim_buf);
+    shim_pos = 0;
+    shim_ph = 0.0f;
+    crush_val = 0.0f;
+    crush_cnt = 0;
+    memset(rev_buf, 0, sizeof rev_buf);
+    rev_pos = 0;
+    rev_age = 0.0f;
+    memset(dec_buf, 0, sizeof dec_buf);
+    dec_pos = 0;
+    for (i = 0; i < 4; i++)
+        eng_lvl[i] = 0.0f;
+    memset(flt_lp_ic, 0, sizeof flt_lp_ic);
+    memset(flt_hp_ic, 0, sizeof flt_hp_ic);
+    sample_now = 0;
+    next_mih_at = next_drop_at = next_drift_at = 0;
+    gen_notes = 0;
+    memset(&SM, 0, sizeof SM);
+    memset(&ui, 0, sizeof ui);
+    ui.arp_cur = -1000;
+    ui.arp_led_key = -1;
+    arp_steps = 0;
+    arp_last_key = -1;
+    mn_n = 0;
+    dice_count = 0;
+    led_ns_cur = -1;
+    led_dim_m = led_lit_m = led_mid_m = led_seen_m = 0;
+}
+
 int app_expect(const char *what, int *got)
 {
     if (!strcmp(what, "scene"))
@@ -2409,8 +2694,10 @@ int app_expect(const char *what, int *got)
         *got = (int)arp_steps;
     else if (!strcmp(what, "arpled"))
         *got = (int)arp_last_key;
-    else if (!strncmp(what, "ledseen", 7))
-        *got = (int)((led_seen_m >> (atoi(what + 7) % NKEYS)) & 1u);
+    else if (!strncmp(what, "ledseen", 7)) {
+        int li = atoi(what + 7);
+        *got = li < 0 ? 0 : (int)((led_seen_m >> (li % NKEYS)) & 1u);   /* v0.4.1: a negative suffix shifted UB-wards */
+    }
     else if (!strcmp(what, "snap"))
         *got = set.snap_sel;
     else if (!strcmp(what, "snapused"))
@@ -2434,8 +2721,10 @@ int app_expect(const char *what, int *got)
                 cn++;
         *got = cn;
     }
-    else if (!strncmp(what, "turns", 5))
-        *got = ui.turns[atoi(what + 5) % NE];
+    else if (!strncmp(what, "turns", 5)) {
+        int ti = atoi(what + 5);
+        *got = ti < 0 ? 0 : ui.turns[ti % NE];   /* v0.4.1: same guard */
+    }
     else
         return 0;
     return 1;

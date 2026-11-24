@@ -1,7 +1,7 @@
 # GWAAN-1 v0.3: FREEZE (the GLO button). With the drone built up, freeze
 # engages (the whole keyboard goes to mid glow), every layer is muted,
 # and the captured wash must sustain alone in frz.wav; after release,
-# rel.wav must fall silent (analysed by analyze_v03.py).
+# frzrel.wav must fall silent (analysed by analyze_v03.py).
 wait 500
 master 4096
 wait 8000
@@ -24,6 +24,6 @@ tap GLO
 wait 100
 expect freeze 0
 wait 1500
-wav rel.wav
+wav frzrel.wav
 wait 2500
 wavstop

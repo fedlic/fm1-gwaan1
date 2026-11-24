@@ -7,6 +7,7 @@
   "tagline": "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs",
   "description": "GWAAN-1 turns the FM-1 into an ambient drone machine. Four layers - a gliding FM voice (mihyon), a sub drone with crossfading chord fields (guwaan), filtered-noise air with rare drops, and beacon pings pitched from the field - play themselves from power-on. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN); knob macros for glide, depth, space and drift, plus a resonant SELECT filter. Live edition: mixer page (layer volumes + mutes), an arpeggiator, FREEZE / SHIMMER / CRUSH / reverse echo, a filter LFO, four snapshots, a dice re-roll, stereo width, stage-bright lights, USB MIDI + CC. Never harsh.",
   "tags": ["synth", "generative", "ambient"],
+  "source": "https://github.com/fedlic/fm1-gwaan1",
   "hardware": {
     "models": ["FM-1"],
     "flash": ["856014", "B36014"],

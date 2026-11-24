@@ -1,0 +1,14 @@
+# GWAAN-1 v0.4.1 regression: a reboot forgets the runtime, like a
+# real power cycle. FREEZE is session-only state (it is not in the
+# saved settings), so it must be OFF after a reboot. Before
+# app_host_reboot existed, the sim's reboot leaked it and this read 1.
+wait 600
+master 4096
+tap GLO
+wait 200
+expect freeze 1
+tap SAVE
+wait 300
+reboot
+wait 600
+expect freeze 0

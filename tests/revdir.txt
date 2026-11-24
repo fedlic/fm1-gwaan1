@@ -1,0 +1,45 @@
+# AUDIT: does REV ECHO actually play backwards? (analyze_revdir.py)
+# Layers muted, SPACE 0. The same two notes (key 0, then key 15) are
+# played twice with an identical script: segment A with REV ECHO at 0
+# (the dry source), segment B with REV ECHO full. The sim is
+# deterministic and the key voices are pure functions of time since
+# note-on, so B - A isolates the reverse echo. The analyzer correlates
+# the isolated echo against the source segment, forward and reversed.
+wait 600
+master 4096
+tap EDIT
+tap FX
+tap SEL
+tap ENV
+tap LFO
+tap EDIT
+turn K3 -18
+wait 2000
+wav revA.wav
+wait 100
+key 0 down
+wait 350
+key 0 up
+wait 500
+key 15 down
+wait 350
+key 15 up
+wait 1600
+wavstop
+wait 500
+tap FX
+tap ENV
+turn K1 32
+tap FX
+wait 500
+wav revB.wav
+wait 100
+key 0 down
+wait 350
+key 0 up
+wait 500
+key 15 down
+wait 350
+key 15 up
+wait 1600
+wavstop

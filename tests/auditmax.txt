@@ -1,0 +1,28 @@
+# GWAAN-1 v0.4.1 AUDIT: the limiter under worst-case stacking - all
+# layers at full mixer gain, KNOB2/KNOB4 max, SPACE max, SHIMMER full,
+# CRUSH half, FREEZE holding a loud wash, four keys held on top. The
+# output must stay under full scale (peak_db_max -1) and stay loud.
+wait 600
+master 4096
+turn K2 32
+turn K3 16
+turn K4 32
+tap FX
+turn K1 32
+turn K2 16
+tap FX
+wait 12000
+tap GLO
+key 0 down
+key 5 down
+key 10 down
+key 15 down
+peakreset
+wait 15000
+expect peak_db_max -1
+expect peak_db_min -24
+key 0 up
+key 5 up
+key 10 up
+key 15 up
+tap GLO

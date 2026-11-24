@@ -31,3 +31,10 @@ void app_say(const char *a, const char *b);   /* a short message on the screen a
  * snap, snapused, flfo, flfodep, flforate, revecho, wide, dice, midin */
 #define APP_HOST_EXPECT
 int app_expect(const char *what, int *got);
+
+/* the sim's reboot/crash/restart commands call this before booting
+ * again: the app's RAM state resets, as a real power cycle would
+ * (v0.4.1 - without it, a sim "reboot" leaked the runtime state and
+ * the persistence tests overstated what a real boot restores) */
+#define APP_HOST_REBOOT
+void app_host_reboot(void);

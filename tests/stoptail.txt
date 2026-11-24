@@ -1,0 +1,15 @@
+# GWAAN-1 v0.4.1 regression (analyze_stop.py): the PLAY stop tail.
+# SPACE at full, the drone runs 8 s, then PLAY stops it; stop.wav
+# starts at the stop. The dry part fades in ~0.3 s - and since v0.4.1
+# the echo/reverb feedback drains with the PLAY gate, so the wet tail
+# must be gone within ~1 s too. v0.4 measured -26.4 dBFS at 1.0-1.5 s
+# and -38 dBFS at 4.0-4.5 s: the wash rang on for seconds.
+wait 600
+master 4096
+turn K3 32
+wait 8000
+tap PLAY
+wav stop.wav
+wait 5000
+wavstop
+tap PLAY

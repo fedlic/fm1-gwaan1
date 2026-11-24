@@ -66,7 +66,7 @@ if ma > -50.0:
     fails += 1
 
 frz, sr = load(f"{d}/frz.wav")
-rel, _ = load(f"{d}/rel.wav")
+rel, _ = load(f"{d}/frzrel.wav")
 f0 = seg_rms(frz, sr, 0.2, 2.2)
 f1 = seg_rms(frz, sr, 3.0, 5.0)
 print(f"frozen wash RMS: first {f0:.1f} dB, last {f1:.1f} dB")

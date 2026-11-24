@@ -1,0 +1,74 @@
+# GWAAN-1 v0.4.1 regression: the MIDI note lifecycle. v0.4 re-snapped
+# the note number at note-off under the then-current scene, shared one
+# voice between two inputs snapping to the same pitch, dropped held
+# MIDI notes at both arp handovers, and (in FOREST/RAIN) could snap
+# note 127 to a voice owner that wrapped and could never be released.
+wait 600
+master 4096
+# a scene change while held must not strand the note (DEEP -> FOREST)
+midi 90 3C 64
+wait 200
+expect midin 1
+turn PRESET 1
+wait 100
+midi 80 3C 00
+wait 200
+expect midin 0
+turn PRESET -1
+wait 100
+# FOREST, top note 127: releases cleanly
+turn PRESET 1
+wait 100
+midi 90 7F 64
+wait 300
+expect midin 1
+midi 80 7F 00
+wait 200
+expect midin 0
+turn PRESET -1
+wait 100
+# two inputs snapping to one pitch (DEEP: notes 60 and 61 both -> 60):
+# the first note-off must not kill the voice
+midi 90 3C 64
+midi 90 3D 64
+wait 200
+expect midin 1
+midi 80 3C 00
+wait 200
+expect midin 1
+midi 80 3D 00
+wait 200
+expect midin 0
+# the arp handover, both ways: a held note joins the cycle, then comes
+# back as a direct voice when the arp turns off
+midi 90 3E 64
+wait 200
+expect midin 1
+midi B0 2E 7F
+wait 2600
+expect arpled -63
+midi B0 2E 00
+wait 200
+expect midin 1
+midi 80 3E 00
+wait 200
+expect midin 0
+# with the arp on at the slowest rate, a fresh note speaks at once -
+# it does not wait for a step (note 62 held and gated by the arp,
+# note 64 tapped on top: two MIDI voices sound together)
+midi B0 23 7F
+midi B0 24 7F
+midi B0 2E 7F
+wait 100
+midi 90 3E 64
+wait 400
+midi 90 40 64
+wait 300
+expect midin 2
+midi 80 40 00
+wait 200
+expect midin 1
+midi 80 3E 00
+midi B0 2E 00
+wait 200
+expect midin 0

@@ -5,8 +5,10 @@ flfowav.txt: SELECT at -24, LFO depth full, 2 s period. The 3-8 kHz
 band's 0.5 s window RMS must swing (max/min > 6 dB) with the LFO on,
 and swing less with it off.
 
-revwav.txt: a lone key note, layers muted, SPACE off. The 6-9 s tail
-must be louder with REVERSE ECHO at full than without it.
+revwav.txt: lone key notes, layers muted, SPACE off. The tail in the
+0.5-3.5 s window after the last note's release (the window the code
+below measures) must be louder with REVERSE ECHO at full than without
+it. Playback direction itself is checked by analyze_revdir.py.
 
 widewav.txt: the drone at width 0 / 127. The side RMS ((L-R)/2) must
 rise >= 6 dB with width, and the mono sum ((L+R)/2) RMS must stay

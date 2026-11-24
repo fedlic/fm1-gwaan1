@@ -1,8 +1,10 @@
 # GWAAN-1 v0.4: REVERSE ECHO (analyze_v04.py). All layers muted, so
 # key notes are the only sound. Three short notes are played; in the
-# 0.5-3.5 s window after the last one, the direct voices have melted
-# (tau ~0.6 s) but the reverse echo keeps replaying the attacks
-# backwards into the space - revon must sit louder than revoff there.
+# 0.5-3.5 s window after the last one, the direct voices are melting
+# (release tau ~1.19 s - the same in both captures) while the reverse
+# echo keeps replaying the recent attacks backwards on top - revon
+# must sit louder than revoff there. (Whether the playback really
+# runs backwards is analyze_revdir.py's job, not this one's.)
 wait 500
 master 4096
 turn K3 -7

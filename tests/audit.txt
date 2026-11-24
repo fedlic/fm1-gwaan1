@@ -1,0 +1,86 @@
+# GWAAN-1 v0.4.1 AUDIT (state level): a snapshot round-trip of the
+# EDGE items snap.txt does not cover (arp rate/gate, FX-B values, the
+# mixer set, a mute, the scene, freeze), plus MIDI CC spot checks
+# beyond midi.txt (CC24 ends, CC30, CC35, CC42, CC46).
+wait 600
+# --- set the edge values ---
+tap FX
+turn K3 16
+turn K4 -16
+tap ENV
+turn K1 20
+turn K2 15
+turn K3 13
+turn K4 -11
+tap FX
+tap EDIT
+turn K1 -10
+turn K2 -12
+turn K3 -14
+turn K4 -16
+tap SEL
+tap EDIT
+turn PRESET 1
+tap GLO
+wait 100
+expect arprate 104
+expect arpgate 32
+expect revecho 80
+expect wide 60
+expect flfodep 92
+expect flforate 20
+expect mix1 87
+expect mix2 79
+expect mix3 71
+expect mix4 63
+expect mute 2
+expect scene 1
+expect freeze 1
+# --- store into slot 1, scramble with the dice, recall ---
+press SEQ
+wait 800
+release SEQ
+wait 100
+expect snapused 1
+tap SEL
+wait 1700
+tap HOME
+wait 1700
+expect scene 1
+expect arprate 104
+expect arpgate 32
+expect revecho 80
+expect wide 60
+expect flfodep 92
+expect flforate 20
+expect mix1 87
+expect mix2 79
+expect mix3 71
+expect mix4 63
+expect mute 2
+expect freeze 1
+# --- MIDI CC spot checks ---
+midi B0 1E 7F
+wait 100
+expect crush 127
+midi B0 23 64
+wait 100
+expect arprate 100
+midi B0 18 00
+wait 100
+expect sel -48
+midi B0 18 7F
+wait 100
+expect sel 48
+midi B0 2A 7F
+wait 100
+expect mute 6
+midi B0 2A 00
+wait 100
+expect mute 2
+midi B0 2E 7F
+wait 100
+expect arp 1
+midi B0 2E 00
+wait 100
+expect arp 0
