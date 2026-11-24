@@ -1,9 +1,20 @@
-# GWAAN-1 v0.4.2: the living screen - one screenshot per scene, a
-# sonar moment, and the FREEZE frost. The sonar section runs first, on
-# the exact prefix its ping timing was probed with: the sim is
-# deterministic, so the ring is up when the shot lands.
+# GWAAN-1 v0.4.3: the operational display. The v0.4.2 decoration
+# (orb, particles, sonar, ribbon, frost) is gone; the normal page is a
+# performer's readout - layer RMS meters, the field's name and
+# progress, numeric knob readouts, status chips. Captures: the normal
+# page in DEEP and STARS, and the mixer page.
 wait 600
 master 4096
+expect scene 0
+# play a key so the NOTE chip has something to show
+key 4 down
+wait 300
+key 4 up
+wait 3500
+expect rms1 >10
+expect fldpct >5
+shot v043_deep.png
+# STARS, with the signal layer up so its meter and the SIG dot work
 turn PRESET 1
 wait 200
 turn PRESET 1
@@ -14,40 +25,13 @@ expect scene 3
 turn K4 22
 wait 100
 expect k4 127
-wait 9600
-shot scr_sonar.png
-wait 2200
-shot scr_stars.png
-# DAWN: the horizon glow
-turn PRESET 1
+wait 6000
+shot v043_stars.png
+# the mixer page
+tap EDIT
+wait 300
+expect page 1
+shot v043_mixer.png
+tap EDIT
 wait 100
-expect scene 4
-wait 2400
-shot scr_dawn.png
-# DEEP: bubbles and light rays
-turn PRESET 1
-wait 100
-expect scene 0
-wait 2400
-shot scr_deep.png
-# FOREST: fireflies
-turn PRESET 1
-wait 2500
-shot scr_forest.png
-# RAIN: streaks
-turn PRESET 1
-wait 2500
-shot scr_rain.png
-# back to DEEP for the frost
-turn PRESET 1
-wait 100
-turn PRESET 1
-wait 100
-turn PRESET 1
-wait 100
-expect scene 0
-tap GLO
-wait 100
-expect freeze 1
-wait 1700
-shot scr_freeze.png
+expect page 0

@@ -27,11 +27,17 @@
  * layout facts live in named, asserted places below.
  *
  * v0.4.2: a visuals-only release - the screen was "too plain". The
- * gradient sea now carries a swell orb, per-scene particles, sonar
- * rings from the pings, an output level ribbon, and a FREEZE frost,
- * all on a visual clock that stops when the sound freezes. No audio
- * or control behaviour changes; the render only gained an observer
- * (the ribbon's level history).
+ * gradient sea carried a swell orb, per-scene particles, sonar rings
+ * from the pings, an output level ribbon, and a FREEZE frost.
+ *
+ * v0.4.3: the user rejected the v0.4.2 decoration outright ("だめだめ")
+ * and asked for an operational display instead. All of it is gone -
+ * particles, orb, sonar, glow, frost, the ribbon and its level
+ * history. The normal page is now a performer's readout: per-layer
+ * RMS meters (a render-side observer, like v0.4.2's ribbon but per
+ * layer), the chord field's voicing name and progress, big numeric
+ * knob/SELECT readouts, and boxed status chips. The gradient stays
+ * only as a flat, quiet backdrop. No audio or control changes.
  *
  * Layers, generated from power-on:
  *   MIHYON - an FM voice whose modulator pitch glides slowly (seconds-long
@@ -108,6 +114,18 @@ static const scene_t SCENE[NSCENE] = {
     {"DAWN", RGB(40, 26, 42), RGB(150, 86, 54), 87.31f, 5, {0, 2, 4, 7, 9, 0, 0},
      {{0, 12, 19, 24}, {0, 12, 21, 26}, {5, 17, 24, 31}, {7, 19, 26, 31}},
      38.0f, 2.76f, 0.40f, 0.5f, 0.95f, 0.6f, 1600.0f},
+};
+
+/* v0.4.3: the field voicings' names, for the performer's display.
+ * Each label names the pitch classes over the voicing's own sub note
+ * (octaves folded): {0,3,7} MIN, {0,2,7} ADD9, {0,7,11} MAJ7,
+ * {0,3,10} MIN7, {0,7} 5TH, {0,6,11} LYD (STARS' #4), {0,2,9} 6/9. */
+static const char *const VOICE_NAME[NSCENE][4] = {
+    {"MIN",  "ADD9", "MAJ7", "ADD9"},    /* DEEP */
+    {"ADD9", "5TH",  "5TH",  "5TH"},     /* FOREST */
+    {"5TH",  "MIN7", "ADD9", "5TH"},     /* RAIN */
+    {"ADD9", "LYD",  "ADD9", "5TH"},     /* STARS */
+    {"5TH",  "6/9",  "ADD9", "5TH"},     /* DAWN */
 };
 
 /* --------------------------------------------------------------- settings --- */
@@ -473,14 +491,12 @@ static float echo_lp2;                   /* the echo's second tap (half the dela
  * page's key-light meters; written by the render, read by the UI */
 static volatile float eng_lvl[4];
 
-/* v0.4.2: the output level history behind the screen's audio ribbon.
- * One RMS value per audio block (256 frames, ~5.8 ms), 240 of them:
- * ~1.4 s of history. Written by the render, read by the UI; pure
- * observation, the audio path never reads it. While FREEZE is engaged
- * the render stops pushing, so the ribbon holds still with the wash. */
-#define LVL_N 240
-static volatile float lvl_hist[LVL_N];
-static volatile uint32_t lvl_head;       /* the next slot to write */
+/* v0.4.3: per-layer RMS of the post-mixer contributions, one value per
+ * audio block, for the normal page's level meters. Written by the
+ * render, read by the UI; pure observation, like eng_lvl - the audio
+ * path never reads it. (v0.4.2's output level history for the ribbon
+ * is gone with the ribbon.) */
+static volatile float eng_rms[4];
 
 /* SELECT (v0.2.1): a real resonant filter, replacing the POKE-1-derived
  * tone tilt the user called out on the device ("tone, not a filter").
@@ -727,7 +743,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float gain_t = (float)master_q12 / 4096.0f * 8300000.0f * 1.6f;
     static float gain_now, eng_gain;
     static float blk_pk[4];              /* v0.3: per-block layer peaks for the mixer meters */
-    static float lvl_ss;                 /* v0.4.2: the ribbon's per-block sum of squares */
+    static float blk_ss[4];              /* v0.4.3: per-block layer sums of squares, for the RMS meters */
     static uint8_t frz_prev;             /* v0.3: the freeze engage edge */
     static float flfo_ph;                /* v0.4: the filter LFO's phase */
     const scene_t *sc = &SCENE[set.scene];
@@ -949,6 +965,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (fm_fabsf(c1) > blk_pk[1]) blk_pk[1] = fm_fabsf(c1);
             if (fm_fabsf(c2) > blk_pk[2]) blk_pk[2] = fm_fabsf(c2);
             if (fm_fabsf(c3) > blk_pk[3]) blk_pk[3] = fm_fabsf(c3);
+            blk_ss[0] += c0 * c0;        /* v0.4.3: the RMS meters' taps */
+            blk_ss[1] += c1 * c1;
+            blk_ss[2] += c2 * c2;
+            blk_ss[3] += c3 * c3;
             s = c0 + c1 + c2 + c3;
         }
         /* FREEZE (v0.3): while live, the ring records the layer mix; while
@@ -1171,12 +1191,6 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             gR = oR * SM.lim * gain_now;
             lr[2 * i] = (int32_t)gL;
             lr[2 * i + 1] = (int32_t)gR;
-            /* v0.4.2: the ribbon's sum of squares (normalised to
-             * full scale here, so the block RMS comes out 0..~1) */
-            {
-                float qL = gL * (1.0f / 8388608.0f), qR = gR * (1.0f / 8388608.0f);
-                lvl_ss += qL * qL + qR * qR;
-            }
         }
         sample_now++;
     }
@@ -1185,14 +1199,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         for (j = 0; j < 4; j++) {
             eng_lvl[j] = blk_pk[j] > eng_lvl[j] ? blk_pk[j] : eng_lvl[j] * 0.93f;
             blk_pk[j] = 0.0f;
-        }
-    }
-    {                                    /* v0.4.2: publish one ribbon point */
-        float rms = fm_sqrtf(lvl_ss / (2.0f * (float)n));
-        lvl_ss = 0.0f;
-        if (!eng_freeze) {               /* frozen: the trace holds still */
-            lvl_hist[lvl_head] = rms;
-            lvl_head = (lvl_head + 1u) % LVL_N;
+            eng_rms[j] = fm_sqrtf(blk_ss[j] / (float)n);   /* v0.4.3 */
+            blk_ss[j] = 0.0f;
         }
     }
 }
@@ -1521,11 +1529,30 @@ static float key_freq(int k)
     return f;
 }
 
-/* v0.4.2: the screen's key blip - the last key voice's position on the
- * keyboard and when it spoke, so the main page can flash a soft dot at
- * that spot on its ribbon. Written here (the UI thread), read by draw. */
-static int32_t vis_blip_key = -1;
-static uint32_t vis_blip_at;
+/* v0.4.3: the last key voice's note name and when it spoke, for the
+ * normal page's NOTE readout. Written here (the UI thread, in
+ * voice_start), read by draw. (Was v0.4.2's ribbon blip.) */
+static char last_note[8];
+static uint32_t last_note_at;
+static const char *const NOTE_PC[12] = {"C", "C#", "D", "D#", "E", "F",
+                                        "F#", "G", "G#", "A", "A#", "B"};
+static void note_name_of(float f, char *d)
+{
+    int nn = (int)(69.0f + 12.0f * fm_log2f(f / 440.0f) + 0.5f);
+    const char *pc;
+    int oct;
+    if (nn < 0)
+        nn = 0;
+    if (nn > 127)
+        nn = 127;
+    pc = NOTE_PC[nn % 12];
+    oct = nn / 12 - 1;
+    while (*pc)
+        *d++ = *pc++;
+    if (oct >= 0 && oct <= 9)
+        *d++ = (char)('0' + oct);
+    *d = 0;
+}
 
 /* A voice for a marker: a panel key (0..26) or a MIDI note (-1-note).
  * v0.4: MIDI notes start here too, with their velocity. A voice already
@@ -1533,8 +1560,8 @@ static uint32_t vis_blip_at;
 static void voice_start(int marker, float freq, float vel)
 {
     int i, best = -1;
-    vis_blip_key = marker >= 0 ? marker : nearest_key(freq);
-    vis_blip_at = plat_ms();
+    note_name_of(freq, last_note);       /* v0.4.3: the NOTE readout */
+    last_note_at = plat_ms();
     for (i = 0; i < NKEYV; i++)
         if (keyv[i].st == 1 && keyv[i].key == marker) {
             keyv[i].ph = 0.0f;
@@ -2370,30 +2397,17 @@ static void input(void)
 
 void app_input_only(void) { input(); }
 
-/* ------------------------------------------------- v0.4.2: screen life ---
- * The main page used to be a bare gradient sea with one drifting light
- * band - the user's verdict: "寂しすぎ" (too plain). The sea now
- * carries a soft orb breathing with the swell, per-scene particles
- * (STARS twinkle, RAIN streaks fall, DEEP bubbles rise under light
- * rays, FOREST fireflies drift, DAWN gets a horizon glow), sonar rings
- * from the SIGNAL pings, an audio ribbon along the lower edge driven
- * by the output's own level history, and a frost that creeps in under
- * FREEZE. All motion is slow and soft-edged: no flashing, ever.
- *
- * Everything blends against the gradient's row colours (the sea is
- * row-uniform, so the colour under any pixel is known without reading
- * the canvas back). Motion runs on a visual clock, vis_t -
- * milliseconds of UNfrozen time: under FREEZE the clock stops, the
- * particles hold, the swell reading holds, and the ribbon stops (the
- * render stops feeding it), so the whole scene visibly waits.
- * Particles come from a table seeded per scene by a dedicated
- * xorshift - never the audio RNG - so host screenshots reproduce. */
-static uint32_t vis_t;                   /* the visual clock, ms */
-static uint32_t vis_last;                /* plat_ms at the previous draw */
-static float vis_swell;                  /* the swell reading, held under FREEZE */
-static float vis_frost;                  /* the frost blend, 0..1, glided */
-static uint16_t rowcol[150];             /* this frame's gradient, per row */
-
+/* ------------------------------------------- v0.4.3: the display, redone --
+ * v0.4.2 decorated the gradient sea (a swell orb, per-scene particles,
+ * sonar rings, an output ribbon, a FREEZE frost). The user rejected
+ * it outright and asked for an operational display instead. All of it
+ * is gone, the ribbon's level history with it. What remains of the
+ * sea is a flat, quiet backdrop: a plain top-to-bottom lerp of the
+ * scene's colours, darkened. Everything drawn on the normal page now
+ * is information a performer reads at arm's length: per-layer RMS
+ * meters, the chord field's voicing name and progress, numeric knob
+ * and SELECT readouts, and boxed status chips. Nothing on the screen
+ * moves that does not mean something. */
 static uint16_t col_blend(uint16_t a, uint16_t b, float t)
 {
     float r = (float)((a >> 11) & 31u) + ((float)((b >> 11) & 31u) - (float)((a >> 11) & 31u)) * t;
@@ -2402,231 +2416,55 @@ static uint16_t col_blend(uint16_t a, uint16_t b, float t)
     return (uint16_t)(((uint32_t)r << 11) | ((uint32_t)g << 5) | (uint32_t)bl);
 }
 
-/* blend fg over the gradient colour of row y, alpha a (0..1). Only
- * valid while the 240x150 gradient canvas is the active one. */
-static void pset_blend(int32_t x, int32_t y, uint16_t fg, float a)
-{
-    if ((uint32_t)x >= 240u || (uint32_t)y >= 150u || a <= 0.0f)
-        return;
-    if (a > 1.0f)
-        a = 1.0f;
-    cv_pset(x, y, col_blend(rowcol[y], fg, a));
-}
-
-static float wrapf(float v, float m)     /* v mod m, for v >= 0 */
-{
-    return v - m * (float)(int32_t)(v / m);
-}
-
-/* the particle table: four 0..1 numbers per particle (x, y, phase,
- * character), seeded per scene from a fixed seed */
-#define NPART 40
-static float part_p[NPART][4];
-static int part_scene = -1;
-static void part_seed(int scene)
-{
-    uint32_t s = 0x2545F491u + (uint32_t)(scene + 1) * 0x9E3779B9u;
-    int i, j;
-    for (i = 0; i < NPART; i++)
-        for (j = 0; j < 4; j++) {
-            s ^= s << 13;
-            s ^= s >> 17;
-            s ^= s << 5;
-            part_p[i][j] = (float)(s >> 8) * (1.0f / 16777216.0f);
-        }
-    part_scene = scene;
-}
-
-/* the swell orb: a soft disc at the sea's centre whose radius and
- * light follow the swell. The falloff is computed on squared distance
- * (no sqrt, no hard edge anywhere). */
-static void draw_orb(float swell01, float bright)
-{
-    const int32_t cx = 120, cy = 68;
-    float R = 30.0f + 15.0f * swell01;
-    float inv = 1.0f / (R * R);
-    uint16_t fg = RGB(216, 232, 250);
-    int32_t x, y, ext = (int32_t)(R * 1.19f) + 1;
-    float gain = bright * (0.72f + 0.28f * swell01);
-    for (y = cy - ext; y <= cy + ext; y++) {
-        float dy = (float)(y - cy) * 1.12f;
-        for (x = cx - ext; x <= cx + ext; x++) {
-            float dx = (float)(x - cx);
-            float d2 = (dx * dx + dy * dy) * inv;
-            float a;
-            if (d2 >= 1.4f)
-                continue;
-            if (d2 < 1.0f) {
-                float u = 1.0f - d2;
-                a = 0.05f + 0.33f * u * u;
-            } else
-                a = 0.05f * (1.4f - d2) / 0.4f;
-            pset_blend(x, y, fg, a * gain);
-        }
-    }
-}
-
-static void draw_particles(float t, float bright)
-{
-    int i;
-    if (part_scene != (int)set.scene)
-        part_seed((int)set.scene);
-    switch (set.scene) {
-    case SC_STARS:
-        for (i = 0; i < NPART; i++) {
-            float tw = 0.5f + 0.5f * fm_sinf(t * (0.25f + part_p[i][2] * 0.8f) +
-                                             part_p[i][1] * TWO_PI);
-            float a = (0.13f + 0.8f * tw * tw) * bright;
-            int32_t x = (int32_t)(part_p[i][0] * 236.0f) + 2;
-            int32_t y = (int32_t)(part_p[i][1] * 136.0f) + 2;
-            pset_blend(x, y, RGB(219, 233, 255), a);
-            if (part_p[i][3] > 0.82f) {  /* the brightest few spread a little */
-                pset_blend(x + 1, y, RGB(219, 233, 255), a * 0.55f);
-                pset_blend(x, y + 1, RGB(219, 233, 255), a * 0.55f);
-            }
-        }
-        break;
-    case SC_RAIN:
-        for (i = 0; i < 22; i++) {
-            float sp = 30.0f + part_p[i][2] * 22.0f;      /* px/s, falling */
-            int32_t y0 = (int32_t)wrapf(part_p[i][1] * 158.0f + t * sp, 158.0f) - 4;
-            int32_t x0 = (int32_t)(part_p[i][0] * 244.0f) - (y0 >> 2);
-            int j;
-            for (j = 0; j < 4; j++)
-                pset_blend(x0 - (j >> 1), y0 + j, RGB(178, 204, 228),
-                           (0.46f - 0.10f * (float)j) * bright);
-        }
-        break;
-    case SC_DEEP: {
-        int r2, x, y;
-        /* light rays from the surface: three soft swaying columns */
-        for (r2 = 0; r2 < 3; r2++) {
-            float cx = 36.0f + (float)r2 * 82.0f + 9.0f * fm_sinf(t * 0.07f + (float)r2 * 2.1f);
-            for (y = 0; y < 58; y++) {
-                float ay = (1.0f - (float)y / 58.0f) * 0.16f * bright;
-                for (x = (int32_t)cx - 6; x < (int32_t)cx + 6; x++) {
-                    float ax = 1.0f - fm_fabsf((float)x - cx) / 6.0f;
-                    if (ax > 0.0f)
-                        pset_blend(x, y, RGB(150, 200, 240), ay * ax);
-                }
-            }
-        }
-        /* bubbles rising, wobbling a little on the way up */
-        for (i = 0; i < 14; i++) {
-            float sp = 3.0f + part_p[i][2] * 4.5f;        /* px/s, rising */
-            int32_t y = 150 - (int32_t)wrapf(part_p[i][1] * 152.0f + t * sp, 152.0f);
-            int32_t x = (int32_t)(part_p[i][0] * 232.0f) + 4 +
-                        (int32_t)(3.0f * fm_sinf(t * 0.6f + part_p[i][1] * TWO_PI));
-            int32_t r = part_p[i][3] > 0.5f ? 2 : 1;
-            float a = 0.5f * bright;
-            pset_blend(x - r, y, RGB(190, 224, 248), a);
-            pset_blend(x + r, y, RGB(190, 224, 248), a);
-            pset_blend(x, y - r, RGB(190, 224, 248), a);
-            pset_blend(x, y + r, RGB(190, 224, 248), a * 0.7f);
-        }
-        break;
-    }
-    case SC_FOREST:
-        for (i = 0; i < 16; i++) {
-            int32_t x = (int32_t)(part_p[i][0] * 240.0f +
-                                  15.0f * fm_sinf(t * (0.05f + part_p[i][2] * 0.09f) +
-                                                  part_p[i][1] * TWO_PI));
-            int32_t y = (int32_t)(24.0f + part_p[i][1] * 104.0f +
-                                  10.0f * fm_sinf(t * (0.06f + part_p[i][3] * 0.09f) +
-                                                  part_p[i][2] * TWO_PI));
-            float pu = 0.5f + 0.5f * fm_sinf(t * (0.35f + part_p[i][1] * 0.6f) +
-                                             part_p[i][3] * TWO_PI);
-            float a = pu * pu * 0.95f * bright;
-            pset_blend(x, y, RGB(198, 232, 148), a);
-            if (a > 0.3f)
-                pset_blend(x + 1, y, RGB(198, 232, 148), a * 0.5f);
-        }
-        break;
-    default:                             /* DAWN: the glow is in the rows */
-        break;
-    }
-}
-
-/* sonar: while a SIGNAL ping is young, rings spread from the ping's
- * place on the keyboard, squashed flat like ripples on water */
-static void draw_sonar(float bright)
-{
-    uint32_t sage;
-    float age;
-    int32_t cx, ring;
-    if (sig_last_freq <= 0.0f || eng_freeze)
-        return;
-    sage = (uint32_t)sample_now - sig_last_at;
-    if (sage >= (uint32_t)(1.8f * SRATE))
-        return;
-    age = (float)sage / SRATE;
-    cx = 8 + nearest_key(sig_last_freq) * 224 / (NKEYS - 1);
-    for (ring = 0; ring < 2; ring++) {
-        float r = (5.0f + age * 58.0f) * (ring ? 0.55f : 1.0f);
-        float a = 0.42f * (1.0f - age / 1.8f) * (ring ? 0.55f : 1.0f) * bright;
-        int32_t steps = 60 + (int32_t)(r * 3.6f), k;
-        if (steps > 480)
-            steps = 480;
-        for (k = 0; k < steps; k++) {
-            float th = (float)k * TWO_PI / (float)steps;
-            pset_blend(cx + (int32_t)(r * fm_cosf(th)),
-                       104 + (int32_t)(r * 0.60f * fm_sinf(th)),
-                       RGB(190, 226, 250), a);
-        }
-    }
-}
-
-/* the audio ribbon: the output's own level history along the sea's
- * lower edge, newest at the right; a soft dot flashes where the last
- * key voice spoke */
-static void draw_ribbon(float bright)
-{
-    const uint16_t fg = RGB(168, 216, 238);
-    int32_t x;
-    for (x = 0; x < 240; x++) {
-        float v = lvl_hist[(lvl_head + (uint32_t)x) % LVL_N];
-        int32_t h = (int32_t)(v * 44.0f), y;
-        if (h > 13)
-            h = 13;
-        for (y = 147 - h; y < 147; y++)
-            pset_blend(x, y, fg, (y == 147 - h ? 0.85f : 0.30f) * bright);
-        pset_blend(x, 148, fg, 0.20f * bright);
-    }
-    if (vis_blip_key >= 0) {
-        uint32_t age = plat_ms() - vis_blip_at;
-        if (age < 900u) {
-            float a = (1.0f - (float)age / 900.0f) * 0.8f * bright;
-            int32_t bx = 8 + vis_blip_key * 224 / (NKEYS - 1), dx, dy;
-            for (dy = -1; dy <= 1; dy++)
-                for (dx = -1; dx <= 1; dx++)
-                    pset_blend(bx + dx, 138 + dy, RGB(232, 245, 255),
-                               a * ((dx == 0 && dy == 0) ? 1.0f : 0.45f));
-            pset_blend(bx, 143, RGB(232, 245, 255), a * 0.5f);
-        }
-    }
-}
-
-/* one gradient row: lerp the scene's two colours, wave-shaded, with the
- * swell's bright band drifting through */
-static uint16_t grad_row(const scene_t *sc, int y, int h, uint32_t now, float swell01)
+/* a backdrop row: the scene gradient with no wave and no bright band,
+ * darkened a step so the readouts sit on top of it */
+static uint16_t bg_row(const scene_t *sc, int y, int h)
 {
     float t = (float)y / (float)(h - 1);
-    float w = 1.0f + 0.10f * fm_sinf((float)y * 0.11f - (float)now * 0.00045f +
-                                     1.3f * fm_sinf((float)y * 0.023f + (float)now * 0.0002f));
-    float band = (float)y - (110.0f - 55.0f * swell01);
-    float r, g, b;
-    if (band < 0.0f)
-        band = -band;
-    w *= 1.0f + 0.45f * fm_expf(-(band * band) / (2.0f * 18.0f * 18.0f));
-    r = ((float)((sc->col_top >> 11) & 31u) * (1.0f - t) + (float)((sc->col_bot >> 11) & 31u) * t) * w;
-    g = ((float)((sc->col_top >> 5) & 63u) * (1.0f - t) + (float)((sc->col_bot >> 5) & 63u) * t) * w;
-    b = ((float)(sc->col_top & 31u) * (1.0f - t) + (float)(sc->col_bot & 31u) * t) * w;
-    if (r > 31.0f) r = 31.0f;
-    if (g > 63.0f) g = 63.0f;
-    if (b > 31.0f) b = 31.0f;
+    float r = ((float)((sc->col_top >> 11) & 31u) * (1.0f - t) + (float)((sc->col_bot >> 11) & 31u) * t) * 0.72f;
+    float g = ((float)((sc->col_top >> 5) & 63u) * (1.0f - t) + (float)((sc->col_bot >> 5) & 63u) * t) * 0.72f;
+    float b = ((float)(sc->col_top & 31u) * (1.0f - t) + (float)(sc->col_bot & 31u) * t) * 0.72f;
     return (uint16_t)(((uint32_t)r << 11) | ((uint32_t)g << 5) | (uint32_t)b);
 }
 
+/* an outlined box: the status chips' and meter troughs' frame */
+static void box(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t col)
+{
+    cv_rect(x, y, w, 1, col);
+    cv_rect(x, y + h - 1, w, 1, col);
+    cv_rect(x, y, 1, h, col);
+    cv_rect(x + w - 1, y, 1, h, col);
+}
+
+/* one status chip: a boxed "LABEL value" - the value lit when on, dim
+ * when off. Returns the x just past the box plus a gap. */
+static int32_t chip(int32_t x, int32_t y, const char *label, const char *val, int on)
+{
+    int32_t e = cv_text(x + 4, y + 2, &FONT_XS, label, C_GRAY);
+    if (val && *val)
+        e = cv_text(e + 3, y + 2, &FONT_XS, val, on ? C_HI : RGB(112, 112, 120));
+    box(x, y, e - x + 4, 15, on ? RGB(104, 104, 118) : RGB(54, 54, 62));
+    return e + 9;
+}
+
+/* SELECT's signed readout: "-48" .. "0" .. "+48" */
+static void fmt_sel(char *d, int v)
+{
+    if (v > 0)
+        *d++ = '+';
+    else if (v < 0) {
+        *d++ = '-';
+        v = -v;
+    }
+    if (v >= 10)
+        *d++ = (char)('0' + v / 10);
+    *d++ = (char)('0' + v % 10);
+    *d = 0;
+}
+
+/* the layer meters' smoothing, UI side: fast attack, slow release,
+ * one step per draw (the 100 ms redraw cadence) */
+static float mtr_sm[4];
 static void bar(int32_t x, int32_t y, int32_t w, uint8_t v, uint16_t col)
 {
     cv_rect(x, y, w, 5, RGB(40, 40, 48));
@@ -2691,7 +2529,7 @@ static void draw_mixer(void)
     cv_blit(0, 150);
     cv_begin(240, 44, C_BLACK);
     cv_text(10, 2, &FONT_XS, "KNOBS: VOLUME  MUTE: FX SEL ENV LFO", C_GRAY);
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.3", C_GRAY);
     cv_text(178, 24, &FONT_XS, "EDIT:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2727,7 +2565,7 @@ static void draw_fx(void)
         x = cv_text(x + 12, 2, &FONT_XS, "FLFO", C_GRAY);
         cv_text(x + 4, 2, &FONT_XS, (set.flfo & 1u) ? "ON" : "OFF", (set.flfo & 1u) ? C_HI : C_GRAY);
     }
-    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
+    cv_text(10, 24, &FONT_XS, "GWAAN-1 V0.4.3", C_GRAY);
     cv_text(140, 24, &FONT_XS, "ENV:BANK FX:EXIT", C_GRAY);
     cv_blit(0, 196);
 }
@@ -2744,97 +2582,154 @@ static void draw(void)
         draw_fx();
         return;
     }
-    int y;
-    float bright, t;
-    /* v0.4.2: the visual clock - it stops under FREEZE, so the whole
-     * sea holds; the swell reading is only refreshed while unfrozen,
-     * and the frost glides in and out on its own slow blend */
-    {
-        uint32_t dt = now - vis_last;
-        vis_last = now;
-        if (dt > 400u)
-            dt = 400u;
-        if (!eng_freeze) {
-            vis_t += dt;
-            vis_swell = 0.5f + 0.5f * fm_sinf(TWO_PI * swell_ph);
-        }
-        vis_frost += ((eng_freeze ? 1.0f : 0.0f) - vis_frost) * 0.18f;
-        if (!eng_freeze && vis_frost < 0.02f)
-            vis_frost = 0.0f;
-    }
-    bright = ((set.feat >> 3) & 1u) ? 1.3f : 1.0f;   /* STAGE lifts the light a little */
-    t = (float)vis_t / 1000.0f;
-    /* the gradient sea, with DAWN's horizon glow and the FREEZE frost
-     * folded into the rows (rowcol is kept: the life on top blends
-     * against it) */
-    cv_begin(240, 150, sc->col_top);
-    for (y = 0; y < 150; y++) {
-        uint16_t c = grad_row(sc, y, 150, vis_t, vis_swell);
-        if (set.scene == SC_DAWN) {
-            float dy = ((float)y - 104.0f) / 17.0f;
-            c = col_blend(c, RGB(255, 166, 88),
-                          fm_expf(-dy * dy) * (0.16f + 0.42f * vis_swell));
-        }
-        if (vis_frost > 0.0f) {
-            float edge = (y < 14) ? (14 - y) / 14.0f :
-                         (y > 136) ? ((float)y - 136.0f) / 14.0f : 0.0f;
-            c = col_blend(c, RGB(172, 202, 228), vis_frost * (0.26f + 0.30f * edge));
-        }
-        rowcol[y] = c;
-        cv_rect(0, y, 240, 1, c);
-    }
-    draw_orb(vis_swell, bright);
-    draw_particles(t, bright);
-    draw_sonar(bright);
-    draw_ribbon(bright);
-    cv_blit(0, 0);
-    /* the scene and the state */
-    cv_begin(240, 46, C_BLACK);
+    int y, i;
+    /* ---- band A (rows 0..149): state, field, layer meters ---- */
+    cv_begin(240, 150, C_BLACK);
+    for (y = 0; y < 150; y++)
+        cv_rect(0, y, 240, 1, bg_row(sc, y, 150));
     if (msg_showing(now)) {
         int32_t x = cv_text(10, 8, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 8, &FONT_B, ui.msg[1], C_HI);
-        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
     } else {
-        int32_t x = cv_text(10, 8, &FONT_B, sc->name, C_WHITE);
-        x = cv_text(x + 10, 8, &FONT_B, eng_hold ? "HOLD" : eng_playing ? "" : "STOPPED",
-                    eng_hold ? C_HI : C_GRAY);
-        /* v0.4.2: a sounding beacon no longer gets a SIG tag here -
-         * it draws sonar rings on the sea instead (draw_sonar) */
-        /* v0.3/v0.4: the live states ride the footer line */
+        /* the scene, and the transport state across from it */
+        cv_text(10, 5, &FONT_B, sc->name, C_WHITE);
+        cv_text(176, 5, &FONT_B, eng_hold ? "HOLD" : eng_playing ? "PLAY" : "STOP",
+                eng_hold ? RGB(232, 178, 84) : eng_playing ? RGB(120, 224, 140)
+                                                           : RGB(224, 96, 84));
+        /* the chord field: its voicing name and its place in the cycle */
         {
-            int32_t x2 = cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.4.2", C_GRAY);
-            if (eng_freeze)
-                x2 = cv_text(x2 + 8, 32, &FONT_XS, "FRZ", C_HI);
-            if (set.feat & 1u)
-                x2 = cv_text(x2 + 8, 32, &FONT_XS, "ARP", C_HI);
-            if ((set.feat >> 3) & 1u)
-                x2 = cv_text(x2 + 8, 32, &FONT_XS, "STAGE", C_HI);
-            if (set.flfo & 1u)
-                x2 = cv_text(x2 + 8, 32, &FONT_XS, "FLFO", C_HI);
-            if (set.snap_used >> set.snap_sel & 1u) {
-                char sb[4];
-                sb[0] = 'S';
-                sb[1] = (char)('1' + set.snap_sel);
-                sb[2] = 0;
-                cv_text(x2 + 8, 32, &FONT_XS, sb, C_HI);
-            }
+            int voice = slot[slot_cur].voice;
+            char vb[4];
+            int32_t x;
+            cv_text(10, 30, &FONT_XS, "FIELD", C_GRAY);
+            x = cv_text(52, 26, &FONT_B, VOICE_NAME[set.scene][voice], C_WHITE);
+            vb[0] = (char)('1' + voice);
+            vb[1] = '/';
+            vb[2] = '4';
+            vb[3] = 0;
+            cv_text(x + 8, 30, &FONT_XS, vb, C_GRAY);
+        }
+        /* the field's progress through its 35-50 s span; the bar turns
+         * amber and holds still while the field is held */
+        {
+            float frac = 1.0f - (float)field_left / (sc->field_s * SRATE);
+            int32_t fw;
+            if (frac < 0.0f)
+                frac = 0.0f;
+            if (frac > 1.0f)
+                frac = 1.0f;
+            box(10, 47, 220, 9, RGB(74, 74, 86));
+            fw = (int32_t)(frac * 216.0f);
+            if (fw > 0)
+                cv_rect(12, 49, fw, 5, eng_hold ? RGB(232, 178, 84) : C_HI);
         }
     }
+    /* the layer meters: the real per-layer RMS (eng_rms, tapped in the
+     * render), smoothed for the eye. A muted layer reads red and MUT -
+     * its contribution is zero anyway, the mixer folds it out. */
+    for (i = 0; i < 4; i++) {
+        int32_t ly = 68 + i * 21;
+        int muted = (set.mute >> i) & 1u;
+        float tgt = eng_rms[i];
+        float p;
+        int pct;
+        char num[8];
+        mtr_sm[i] += (tgt - mtr_sm[i]) * (tgt > mtr_sm[i] ? 0.55f : 0.10f);
+        p = mtr_sm[i] / 0.36f;           /* full scale at 0.36 RMS: the drone
+                                          * bed sits ~3/4, pings still spike */
+        if (p > 1.0f)
+            p = 1.0f;
+        p = fm_sqrtf(p);
+        pct = (int)(p * 100.0f + 0.5f);
+        cv_text(10, ly, &FONT_XS, LAYER_NAME[i],
+                muted ? RGB(224, 96, 84) : RGB(168, 168, 178));
+        box(58, ly + 1, 126, 8, muted ? RGB(120, 50, 50) : RGB(74, 74, 86));
+        if (pct > 0)
+            cv_rect(60, ly + 3, (int32_t)(p * 122.0f), 4,
+                    muted ? RGB(150, 60, 55) : C_HI);
+        if (muted)
+            cv_text(192, ly, &FONT_XS, "MUT", RGB(224, 96, 84));
+        else {
+            fmt_u3(num, pct);
+            cv_text(192, ly, &FONT_XS, num, C_WHITE);
+            cv_text(192 + (pct >= 100 ? 18 : pct >= 10 ? 12 : 6), ly,
+                    &FONT_XS, "%", C_GRAY);
+        }
+    }
+    cv_blit(0, 0);
+    /* ---- band B (rows 150..195): SELECT, then status chips ---- */
+    cv_begin(240, 46, C_BLACK);
+    {
+        char sb[8];
+        int32_t fw;
+        cv_text(8, 4, &FONT_XS, "SELECT", C_GRAY);
+        box(56, 3, 130, 9, RGB(74, 74, 86));
+        cv_rect(56 + 64, 1, 2, 13, RGB(120, 120, 132));   /* the centre tick */
+        fw = (int32_t)set.sel * 63 / 48;
+        if (fw > 0)
+            cv_rect(56 + 65, 5, fw, 5, C_WHITE);
+        else if (fw < 0)
+            cv_rect(56 + 65 + fw, 5, -fw, 5, C_WHITE);
+        fmt_sel(sb, (int)set.sel);
+        cv_text(194, 4, &FONT_XS, sb, C_WHITE);
+    }
+    {
+        int32_t x = 8;
+        char sb[4];
+        x = chip(x, 24, "ARP", (set.feat & 1u) ? ARP_PATN[(set.feat >> 1) & 3u] : "OFF",
+                 (set.feat & 1u) != 0);
+        x = chip(x, 24, "FRZ", eng_freeze ? "ON" : "OFF", eng_freeze);
+        x = chip(x, 24, "FLFO", (set.flfo & 1u) ? "ON" : "OFF", (set.flfo & 1u) != 0);
+        if (set.snap_used >> set.snap_sel & 1u) {
+            sb[0] = 'S';
+            sb[1] = (char)('1' + set.snap_sel);
+            sb[2] = 0;
+        } else {
+            sb[0] = '-';
+            sb[1] = '-';
+            sb[2] = 0;
+        }
+        chip(x, 24, "SNAP", sb, (set.snap_used >> set.snap_sel & 1u) != 0);
+    }
     cv_blit(0, 150);
-    /* the knob bars */
+    /* ---- band C (rows 196..239): knob readouts, STAGE / SIG / NOTE ---- */
     cv_begin(240, 44, C_BLACK);
-    cv_text(10, 2, &FONT_XS, "GLIDE", C_GRAY);
-    bar(10, 12, 46, set.k1, C_HI);
-    cv_text(66, 2, &FONT_XS, "DEPTH", C_GRAY);
-    bar(66, 12, 46, set.k2, C_HI);
-    cv_text(122, 2, &FONT_XS, "SPACE", C_GRAY);
-    bar(122, 12, 46, set.k3, C_HI);
-    cv_text(178, 2, &FONT_XS, "DRIFT", C_GRAY);
-    bar(178, 12, 46, set.k4, C_HI);
-    cv_text(10, 24, &FONT_XS, "FILTER", C_GRAY);
-    cv_rect(66, 26, 108, 5, RGB(40, 40, 48));
-    cv_rect(66 + 53, 25, 2, 7, C_GRAY);
-    cv_rect(66 + 54 + (int32_t)set.sel * 54 / 48, 26, 4, 5, C_WHITE);
+    {
+        static const char *const KN[4] = {"GLIDE", "DEPTH", "SPACE", "DRIFT"};
+        const uint8_t kv[4] = {set.k1, set.k2, set.k3, set.k4};
+        int r, c2;
+        for (r = 0; r < 2; r++)
+            for (c2 = 0; c2 < 2; c2++) {
+                int idx = r * 2 + c2;
+                int32_t x = 8 + c2 * 114, y0 = 1 + r * 14;
+                char num[8];
+                cv_text(x, y0, &FONT_XS, KN[idx], C_GRAY);
+                cv_rect(x + 34, y0 + 2, 42, 6, RGB(40, 40, 48));
+                cv_rect(x + 34, y0 + 2, 42 * (int32_t)kv[idx] / 127, 6, C_HI);
+                fmt_u3(num, kv[idx]);
+                cv_text(x + 80, y0, &FONT_XS, num, C_WHITE);
+            }
+    }
+    {
+        int32_t x = 8;
+        int stage = (set.feat >> 3) & 1u;
+        int sig_on = sig_last_freq > 0.0f &&
+                     (uint32_t)sample_now - sig_last_at < (uint32_t)(1.2f * SRATE);
+        int note_on = last_note[0] && (uint32_t)(now - last_note_at) < 5000u;
+        x = chip(x, 29, "STAGE", stage ? "ON" : "OFF", stage);
+        /* SIG: a label and a dot that lights while a ping is sounding */
+        {
+            int32_t e = cv_text(x + 4, 31, &FONT_XS, "SIG", C_GRAY);
+            if (sig_on)
+                cv_rect(e + 3, 33, 7, 7, RGB(140, 220, 250));
+            else
+                box(e + 3, 33, 7, 7, RGB(70, 70, 80));
+            box(x, 29, e + 14 - x, 15, sig_on ? RGB(104, 104, 118) : RGB(54, 54, 62));
+            x = e + 18;
+        }
+        chip(x, 29, "NOTE", note_on ? last_note : "--", note_on);
+        cv_text(198, 31, &FONT_XS, "V0.4.3", C_GRAY);
+    }
     cv_blit(0, 196);
 }
 
@@ -2845,11 +2740,9 @@ void app_ui_init(void)
     ui.arp_led_key = -1;
     ui.arp_dir = 1;
     ui.redraw = 1;
-    vis_t = 0;                               /* v0.4.2: the visual clock starts here */
-    vis_last = plat_ms();
-    vis_swell = 0.5f;
-    vis_frost = 0.0f;
-    part_scene = -1;
+    last_note[0] = 0;                        /* v0.4.3: no NOTE readout yet */
+    last_note_at = 0;
+    memset(mtr_sm, 0, sizeof mtr_sm);        /* the meters start at zero */
 }
 
 void app_frame(void)
@@ -2862,9 +2755,9 @@ void app_frame(void)
         ui.msg_until = 0;
         ui.redraw = 1;
     }
-    if (now - ui.last_draw >= 100u)          /* v0.4.2: 100 ms - the sea's life
-                                              * (orb, particles, sonar) wants
-                                              * a little more than 160 ms gave */
+    if (now - ui.last_draw >= 100u)          /* v0.4.3: 100 ms - the layer
+                                              * meters and the field bar
+                                              * want a steady cadence */
         ui.redraw = 1;
     if (ui.redraw) {
         ui.redraw = 0;
@@ -2930,17 +2823,13 @@ void app_host_reboot(void)
     rev_age = 0.0f;
     memset(dec_buf, 0, sizeof dec_buf);
     dec_pos = 0;
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < 4; i++) {
         eng_lvl[i] = 0.0f;
-    memset((void *)lvl_hist, 0, sizeof lvl_hist);   /* v0.4.2: the ribbon's history */
-    lvl_head = 0;
-    vis_t = 0;                               /* v0.4.2: the visual clock and its state */
-    vis_last = 0;
-    vis_swell = 0.5f;
-    vis_frost = 0.0f;
-    part_scene = -1;
-    vis_blip_key = -1;
-    vis_blip_at = 0;
+        eng_rms[i] = 0.0f;                   /* v0.4.3: the meters' taps */
+    }
+    last_note[0] = 0;                        /* v0.4.3: the NOTE readout */
+    last_note_at = 0;
+    memset(mtr_sm, 0, sizeof mtr_sm);
     memset(flt_lp_ic, 0, sizeof flt_lp_ic);
     memset(flt_hp_ic, 0, sizeof flt_hp_ic);
     sample_now = 0;
@@ -2968,6 +2857,11 @@ int app_expect(const char *what, int *got)
         *got = eng_hold;
     else if (!strcmp(what, "field"))
         *got = slot[slot_cur].voice;
+    else if (!strcmp(what, "fldpct"))        /* v0.4.3: the field bar's % */
+        *got = (int)(100.0f * (1.0f - (float)field_left /
+                               (SCENE[set.scene].field_s * SRATE)));
+    else if (!strncmp(what, "rms", 3) && what[3] >= '0' && what[3] <= '3' && !what[4])
+        *got = (int)(eng_rms[what[3] - '0'] * 1000.0f);
     else if (!strcmp(what, "notes"))
         *got = (int)gen_notes;
     else if (!strcmp(what, "sig"))
