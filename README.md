@@ -98,6 +98,7 @@ JieLi ツールチェーンと AC79 SDK の取得は fm1-base 側の `tools/get_
 
 ## ドキュメント
 
+- [MANUAL.md](MANUAL.md) — 取扱説明書（v0.4 の全操作・MIDI CC 表・ライブのコツ）
 - [SPEC.md](SPEC.md) — 仕様 v0.1（＋v0.2 の方向メモ）
 - [BUILD-REPORT.md](BUILD-REPORT.md) — 実装レポート（v0.1／v0.2／v0.2.1／v0.3／v0.4 の設計・計測・テスト結果）
 
