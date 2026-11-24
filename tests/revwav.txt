@@ -1,0 +1,46 @@
+# GWAAN-1 v0.4: REVERSE ECHO (analyze_v04.py). All layers muted, so
+# key notes are the only sound. Three short notes are played; in the
+# 0.5-3.5 s window after the last one, the direct voices have melted
+# (tau ~0.6 s) but the reverse echo keeps replaying the attacks
+# backwards into the space - revon must sit louder than revoff there.
+wait 500
+master 4096
+turn K3 -7
+tap EDIT
+tap FX
+tap SEL
+tap ENV
+tap LFO
+tap EDIT
+key 10 down
+wait 300
+key 10 up
+wait 700
+key 10 down
+wait 300
+key 10 up
+wait 700
+key 10 down
+wait 300
+key 10 up
+wav revoff.wav
+wait 5000
+wavstop
+tap FX
+tap ENV
+turn K1 32
+tap FX
+key 10 down
+wait 300
+key 10 up
+wait 700
+key 10 down
+wait 300
+key 10 up
+wait 700
+key 10 down
+wait 300
+key 10 up
+wav revon.wav
+wait 5000
+wavstop

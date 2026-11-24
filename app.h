@@ -25,6 +25,9 @@ void app_input_only(void);               /* between frames: input only */
 void app_say(const char *a, const char *b);   /* a short message on the screen and to a screen reader */
 
 /* the host simulator's checks (host/plat_host.c "expect"): scene, playing, hold, field,
- * notes, sig, sigpat, sel, k1..k4, dirty, turnsN, leddimn, ledlit, dimns */
+ * notes, sig, sigpat, sel, k1..k4, dirty, turnsN, leddimn, ledlit, dimns,
+ * page, mix1..mix4, mute, arp, arppat, arprate, arpgate, freeze, shim, crush,
+ * stage, ledmidn, arpsteps, arpled, ledseenN,
+ * snap, snapused, flfo, flfodep, flforate, revecho, wide, dice, midin */
 #define APP_HOST_EXPECT
 int app_expect(const char *what, int *got);

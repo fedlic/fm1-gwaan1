@@ -8,13 +8,13 @@ ble = false                    # no Bluetooth in v0.1: the app is self-contained
 # companion left out on purpose (v0.1 scope): settings live on the panel + SAVE
 # the site (tools/make_site.py, tools/publish_site.sh)
 tagline = "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs"
-repo = "https://github.com/fedlic/fm1-gwaan1"
+repo = ""
 licence = "MPL-2.0 (platform) / app: FEDLIC TOKYO"
 credits = "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp."
 # firmware.json, for firmware hubs (docs/FIRMWARE-JSON.md)
 author = "FEDLIC TOKYO"
-description = "GWAAN-1 turns the FM-1 into an ambient drone machine. Layers - a gliding FM voice (mihyon), a sub drone with crossfading chord fields (guwaan), filtered-noise air with rare drops, and (v0.2) a distant beacon: soft sine pings in morse-like patterns, pitched from the field and washed in echo - play themselves from power-on. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN); knob macros for glide, depth (v0.2: triple-detuned pads, wider swells, a root-x4 body - fat even on the built-in speaker), space and drift (upper travel brings the beacons in). Smoothed and limited: never harsh."
+description = "GWAAN-1 turns the FM-1 into an ambient drone machine. Four layers - a gliding FM voice (mihyon), a sub drone with crossfading chord fields (guwaan), filtered-noise air with rare drops, and beacon pings pitched from the field - play themselves from power-on. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN); knob macros for glide, depth, space and drift, plus a resonant SELECT filter. Live edition: mixer page (layer volumes + mutes), an arpeggiator, FREEZE / SHIMMER / CRUSH / reverse echo, a filter LFO, four snapshots, a dice re-roll, stereo width, stage-bright lights, USB MIDI + CC. Never harsh."
 tags = ["synth", "generative", "ambient"]
 install = ""
 site = ""
-screenshot = "docs/img/screen.png"
+screenshot = ""

@@ -1,0 +1,50 @@
+# GWAAN-1 v0.4: snapshots. SEQ held stores into the selected slot,
+# SEQ tapped cycles slots, HOME tapped recalls - through the 1.2 s
+# glide, so the values land exactly after it. Slots persist via SAVE.
+wait 600
+expect snap 0
+expect snapused 0
+turn K1 10
+turn K3 -8
+wait 100
+expect k1 104
+expect k3 38
+press SEQ
+wait 800
+release SEQ
+wait 100
+expect snapused 1
+turn K1 -20
+turn K3 16
+wait 100
+expect k1 24
+expect k3 102
+tap HOME
+wait 1700
+expect k1 104
+expect k3 38
+tap SEQ
+wait 100
+expect snap 1
+tap HOME
+wait 200
+expect k1 104
+tap SAVE
+wait 50
+expect dirty 0
+reboot
+wait 600
+expect snapused 1
+expect snap 1
+turn K1 -10
+wait 100
+expect k1 64
+tap SEQ
+tap SEQ
+tap SEQ
+wait 100
+expect snap 0
+tap HOME
+wait 1700
+expect k1 104
+expect k3 38

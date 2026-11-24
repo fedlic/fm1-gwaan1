@@ -1,31 +1,16 @@
 {
   "schema": 1,
   "id": "gwaan1",
-  "name": "GWAAN-1",
+  "name": "FEDLIC TOKYO",
   "author": "FEDLIC TOKYO",
-  "license": "MIT AND MPL-2.0",
+  "license": "MPL-2.0 (platform) / app: FEDLIC TOKYO",
   "tagline": "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs",
-  "description": "GWAAN-1 turns the FM-1 into an ambient drone machine that plays itself from power-on. A gliding FM voice (mihyon), a sub drone whose chord fields crossfade every 35-50 seconds (guwaan), filtered-noise air with rare water drops, and since v0.2 a distant beacon: soft sine pings in morse-like patterns, washed in echo. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN) and knob macros for glide, depth, space and drift. v0.2.1: the knobs answer immediately, and SELECT is a true resonant filter. Smoothed and limited: never harsh.",
-  "tags": [
-    "synth",
-    "generative",
-    "ambient"
-  ],
-  "source": "https://github.com/fedlic/fm1-gwaan1",
-  "screenshot": "docs/img/screen.png",
+  "description": "GWAAN-1 turns the FM-1 into an ambient drone machine. Four layers - a gliding FM voice (mihyon), a sub drone with crossfading chord fields (guwaan), filtered-noise air with rare drops, and beacon pings pitched from the field - play themselves from power-on. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN); knob macros for glide, depth, space and drift, plus a resonant SELECT filter. Live edition: mixer page (layer volumes + mutes), an arpeggiator, FREEZE / SHIMMER / CRUSH / reverse echo, a filter LFO, four snapshots, a dice re-roll, stereo width, stage-bright lights, USB MIDI + CC. Never harsh.",
+  "tags": ["synth", "generative", "ambient"],
   "hardware": {
-    "models": [
-      "FM-1"
-    ],
-    "flash": [
-      "856014",
-      "B36014"
-    ],
-    "features": [
-      "usb-audio-in",
-      "usb-audio-out",
-      "screen-reader"
-    ]
+    "models": ["FM-1"],
+    "flash": ["856014", "B36014"],
+    "features": ["usb-audio-in", "usb-audio-out", "screen-reader"]
   },
-  "credits": "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp. App code by FEDLIC TOKYO, MIT."
+  "credits": "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp."
 }

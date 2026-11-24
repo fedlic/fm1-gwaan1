@@ -1,0 +1,21 @@
+# GWAAN-1 v0.3: the STAGE LED mode (HOME held) - the dim pulse rises
+# near the top of its range, and the mode persists through SAVE + reboot.
+wait 600
+expect stage 0
+press HOME
+wait 800
+release HOME
+wait 100
+expect stage 1
+expect dimns >2900
+tap SAVE
+wait 50
+expect dirty 0
+reboot
+wait 600
+expect stage 1
+press HOME
+wait 800
+release HOME
+wait 100
+expect stage 0

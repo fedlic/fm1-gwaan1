@@ -1,0 +1,51 @@
+# GWAAN-1 v0.3 prototype capture: ~90 s for the user's ears.
+# 0-15 s: the DEEP drone as in v0.2 (defaults).
+# ~15-20 s: MIXER page - GUWAAN muted for 5 s, then back; MIHYON's
+# volume drops to half for the rest of the take.
+# ~25-45 s: three keys held, the ARP cycles them over the drone.
+# ~45-60 s: SHIMMER raised on the FX page - octave-up wash blooms.
+# ~60-75 s: FREEZE - all layers muted, the captured wash sustains
+# alone while the arp keeps stepping keys over it.
+# ~75-90 s: freeze released, layers unmuted, the drone closes.
+wait 500
+master 4096
+wav proto3.wav
+wait 14500
+tap EDIT
+tap SEL
+wait 5000
+tap SEL
+turn K1 -16
+tap EDIT
+wait 4800
+key 4 down
+key 9 down
+key 14 down
+tap ARP
+wait 19700
+tap FX
+turn K1 24
+tap FX
+wait 14800
+tap GLO
+wait 2500
+tap EDIT
+tap FX
+tap SEL
+tap ENV
+tap LFO
+tap EDIT
+wait 12000
+tap GLO
+tap EDIT
+tap FX
+tap SEL
+tap ENV
+tap LFO
+tap EDIT
+tap ARP
+key 4 up
+key 9 up
+key 14 up
+wait 14300
+wavstop

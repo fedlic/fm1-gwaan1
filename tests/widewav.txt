@@ -1,0 +1,16 @@
+# GWAAN-1 v0.4: STEREO WIDE (analyze_v04.py). One capture of the
+# drone: width 0 for the first 10 s, width 127 after. The side
+# signal must rise with width; the mono sum, normalised by the left
+# channel (which tracks the drone's own slow evolution), must not
+# collapse.
+wait 500
+master 4096
+turn K3 14
+wav wall2.wav
+wait 10000
+tap FX
+tap ENV
+turn K2 32
+tap FX
+wait 10000
+wavstop

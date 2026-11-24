@@ -1,0 +1,34 @@
+# GWAAN-1 v0.4: USB MIDI in the host sim. CCs drive the main
+# parameters (the map is in the build report); notes play the keyboard
+# voice, snapped to the scene scale, and melt on note-off.
+wait 600
+midi B0 19 7F
+wait 100
+expect k1 127
+midi B0 14 00
+wait 100
+expect mix1 0
+midi B0 18 40
+wait 100
+expect sel 0
+midi B0 28 7F
+wait 100
+expect mute 1
+midi B0 28 00
+wait 100
+expect mute 0
+midi B0 2D 7F
+wait 100
+expect freeze 1
+midi B0 2D 00
+wait 100
+expect freeze 0
+midi B0 2C 7F
+wait 100
+expect flfo 1
+midi 90 3C 64
+wait 200
+expect midin 1
+midi 80 3C 00
+wait 200
+expect midin 0

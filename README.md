@@ -43,9 +43,27 @@ DEEP（深海）／ FOREST（森）／ RAIN（雨）／ STARS（星空）／ DAW
 | REC 長押し | 今の和音をホールド（ラッチ式。もう一度長押しで解除） |
 | SAVE | 現在の設定を保存（保存しないと電源 OFF で戻ります） |
 | OCT- / OCT+ | 鍵盤のオクターブ |
-| 鍵盤 | シーンのスケールにロックされた音が鳴り、離鍵後 約6秒かけて溶けて消えます |
+| 鍵盤 | シーンのスケールにロックされた音が鳴り、離鍵後ゆっくり溶けて消えます |
 
 鍵盤 LED は全体がゆっくり呼吸するようにほんのり光り、押した鍵と SIGNAL のピングに対応する鍵が明るくなります（FM-1 の LED は単色・明るさのみ。色は画面側が担当）。
+
+### ライブ機能（v0.3 / v0.4）
+
+アンビエント／ノイズのライブで使うための機能群です。通常ページの操作は従来通りで、ページは1段だけ潜ります。
+
+| 操作 | 働き |
+|---|---|
+| EDIT | **ミキサーページ**：KNOB1〜4 が層音量（MIHYON／GUWAAN／AIR／SIGNAL）に。FX／SEL／ENV／LFO が各層のミュート。通常ツマミとは別値で、画面にバー＋ミュート状態。鍵盤 LED は4ゾーンのレベルメーターになります |
+| FX | **FX ページ**（ENV でバンク切替）。A：SHIMMER（オクターブ上のリバーブ送り）／CRUSH（ビット・レート削減）／ARP RATE／ARP GATE。B：リバースエコー／ステレオ・ワイド／フィルターLFO の深さ・周期 |
+| ARP タップ／長押し | アルペジエーター ON／OFF ／ パターン（UP→UP-DOWN→RANDOM）。保持した鍵（スケールロック済み）を 0.25〜6 秒のゆっくりしたステップで循環。ステップした鍵が光ります |
+| GLO | **FREEZE**：今のドローンの響きを捕まえて持続させる。下では層が演奏を続け、鍵盤も弾けます。捕捉／解放ともクロスフェード。鍵盤全体がほんのり定常点灯します |
+| SEL | **サイコロ**：安全な範囲でパラメータ一式を振り直し（確認なし、1.2 秒のグライドで着地） |
+| LFO | フィルターLFO：SELECT の効きが周期 2〜40 秒で自動でうねります（手放しでも音が動き続ける） |
+| SEQ タップ／長押し | スナップショットのスロット切替 ／ 現在の設定一式を保存（4スロット） |
+| HOME タップ | 選択中スロットをリコール（全パラメータが 1.2 秒かけてクロスフェード。音は途切れません） |
+| HOME 長押し | STAGE LED モード：暗い会場向けに鍵盤 LED を明るく（保存されます） |
+
+USB MIDI にも対応：ノートはシーンのスケールにスナップして鍵盤ボイスで鳴り（ARP 中は保持集合に合流）、CC でミキサー／フィルター／各マクロ／FX を外部から操作できます（CC 番号表は BUILD-REPORT.md の v0.4 節）。
 
 ## インストール
 
@@ -81,7 +99,7 @@ JieLi ツールチェーンと AC79 SDK の取得は fm1-base 側の `tools/get_
 ## ドキュメント
 
 - [SPEC.md](SPEC.md) — 仕様 v0.1（＋v0.2 の方向メモ）
-- [BUILD-REPORT.md](BUILD-REPORT.md) — 実装レポート（v0.1／v0.2／v0.2.1 の設計・計測・テスト結果）
+- [BUILD-REPORT.md](BUILD-REPORT.md) — 実装レポート（v0.1／v0.2／v0.2.1／v0.3／v0.4 の設計・計測・テスト結果）
 
 ## ライセンスとクレジット
 
@@ -101,6 +119,10 @@ crossfading chord fields ("guwaan"), filtered-noise air with rare water-drop
 bells, and (since v0.2) distant beacon pings like a far-off transmitter —
 play themselves from power-on across five scenes (DEEP / FOREST / RAIN /
 STARS / DAWN). Knobs are musical macros: filter, glide, depth, space, drift.
+The live edition adds a mixer page (per-layer volumes + mutes), an
+arpeggiator, FREEZE / SHIMMER / CRUSH / reverse echo, a filter LFO, four
+recallable snapshots, a dice re-roll, stereo width, stage-bright key
+lights, and USB MIDI notes + CC control.
 Download `gwaan1.fwsc` from Releases and flash it with the browser installer
 at https://seajaysec.github.io/fm-static/ . Note: the 73 Hz sub is nearly
 inaudible on the built-in speaker — use headphones or line out. App code:

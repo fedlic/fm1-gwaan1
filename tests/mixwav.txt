@@ -1,0 +1,20 @@
+# GWAAN-1 v0.3: the mixer's audible effect (analysed by analyze_v03.py).
+# base.wav: all layers. noguw.wav: GUWAAN muted - the 150-600 Hz body
+# band must fall away. muteall.wav: every layer muted - near silence.
+wait 500
+master 4096
+turn K4 -10
+wav base.wav
+wait 6000
+wavstop
+tap EDIT
+tap SEL
+wav noguw.wav
+wait 6000
+wavstop
+tap FX
+tap ENV
+tap LFO
+wav muteall.wav
+wait 4000
+wavstop

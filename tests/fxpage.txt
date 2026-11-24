@@ -1,0 +1,28 @@
+# GWAAN-1 v0.3: the FX page (the FX button). K1 SHIMMER, K2 CRUSH,
+# K3 ARP RATE, K4 ARP GATE - the normal macros are untouched, and the
+# values persist through SAVE + reboot.
+wait 600
+expect page 0
+tap FX
+wait 100
+expect page 2
+turn K1 10
+turn K2 5
+turn K4 -8
+wait 100
+expect shim 40
+expect crush 20
+expect arpgate 64
+expect k1 64
+expect k2 64
+tap FX
+wait 100
+expect page 0
+tap SAVE
+wait 50
+expect dirty 0
+reboot
+wait 600
+expect shim 40
+expect crush 20
+expect arpgate 64

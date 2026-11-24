@@ -1,0 +1,18 @@
+# GWAAN-1 v0.4: DICE (SEL on the normal page). One tap re-rolls the
+# whole set; after the glide the values sit inside the safe ranges:
+# the mix never vanishes, the crush stays musical, K2 stays present.
+wait 600
+expect dice 0
+tap SEL
+wait 100
+expect dice 1
+wait 1600
+expect k1 >29
+expect k2 >39
+expect mix1 >69
+expect mix3 >69
+expect mute 0
+expect crush <61
+tap SEL
+wait 100
+expect dice 2

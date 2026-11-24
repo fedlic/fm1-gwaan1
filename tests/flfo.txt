@@ -1,0 +1,25 @@
+# GWAAN-1 v0.4: the filter LFO switch (the LFO button outside the
+# mixer page) and its FX-B parameters; they persist via SAVE.
+wait 600
+expect flfo 0
+tap LFO
+wait 100
+expect flfo 1
+tap FX
+tap ENV
+wait 100
+turn K3 22
+turn K4 -16
+wait 100
+expect flfodep 127
+expect flforate 0
+tap FX
+tap LFO
+wait 100
+expect flfo 0
+tap SAVE
+wait 50
+reboot
+wait 600
+expect flfodep 127
+expect flforate 0

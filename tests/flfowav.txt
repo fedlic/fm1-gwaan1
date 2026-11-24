@@ -1,0 +1,20 @@
+# GWAAN-1 v0.4: the filter LFO's audible sweep (analyze_v04.py).
+# SELECT parked at -24 (LP ~1.4 kHz), LFO depth full, period 2 s:
+# the 3-8 kHz band must breathe with the LFO in flfoon.wav and sit
+# still in flfooff.wav.
+wait 500
+master 4096
+turn SELECT -6
+tap FX
+tap ENV
+turn K3 22
+turn K4 -16
+tap FX
+tap LFO
+wav flfoon.wav
+wait 16000
+wavstop
+tap LFO
+wav flfooff.wav
+wait 8000
+wavstop
