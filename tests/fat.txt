@@ -1,0 +1,18 @@
+# GWAAN-1 v0.2 fatness measurement: one 80 s capture, DEEP, SIGNAL off.
+# First ~40 s at KNOB2 = 0 (lean: narrow detune, shallow swell, no body),
+# then KNOB2 = 127 for ~40 s (fat). Each half spans at least one full
+# swell period (36 s lean / 20 s fat), so the body-band comparison is not
+# swell-phase biased. Analysed offline by analyze_v02.py.
+wait 500
+master 4096
+turn K4 -10
+turn K2 -16
+wait 100
+expect k2 0
+wav fat.wav
+wait 40000
+turn K2 32
+wait 100
+expect k2 127
+wait 39900
+wavstop

@@ -1,0 +1,20 @@
+# GWAAN-1's build settings (tools/build.py)
+name = "GWAAN1"                # APP_NAME is in app.h; this names the build's files
+id_prefix = "FM-1_14000100"    # package identity (GWAAN-1's own)
+usb_manufacturer = "FEDLIC TOKYO"
+usb_product = "GWAAN-1 FM-1"
+words = "words.tsv"
+ble = false                    # no Bluetooth in v0.1: the app is self-contained
+# companion left out on purpose (v0.1 scope): settings live on the panel + SAVE
+# the site (tools/make_site.py, tools/publish_site.sh)
+tagline = "an ambient drone synth: slow FM swells and deep sub fields, steered by knobs"
+repo = ""
+licence = "MPL-2.0 (platform) / app: FEDLIC TOKYO"
+credits = "Built on fm1-base (Charles Vestal, MPL-2.0) and felucca-bsp."
+# firmware.json, for firmware hubs (docs/FIRMWARE-JSON.md)
+author = "FEDLIC TOKYO"
+description = "GWAAN-1 turns the FM-1 into an ambient drone machine. Layers - a gliding FM voice (mihyon), a sub drone with crossfading chord fields (guwaan), filtered-noise air with rare drops, and (v0.2) a distant beacon: soft sine pings in morse-like patterns, pitched from the field and washed in echo - play themselves from power-on. Five scenes (DEEP, FOREST, RAIN, STARS, DAWN); knob macros for glide, depth (v0.2: triple-detuned pads, wider swells, a root-x4 body - fat even on the built-in speaker), space and drift (upper travel brings the beacons in). Smoothed and limited: never harsh."
+tags = ["synth", "generative", "ambient"]
+install = ""
+site = ""
+screenshot = ""

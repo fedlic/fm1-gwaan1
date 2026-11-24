@@ -1,0 +1,13 @@
+# GWAAN-1 long-run: the chord field advances on its own clock (DEEP: 40 s),
+# and a 3-minute capture stays stable (analysed offline by analyze_long.py).
+wait 600
+expect field 0
+master 4096
+peakreset
+wav long.wav
+wait 55000
+expect field 1
+wait 125000
+wavstop
+expect peak_db_min -36
+expect peak_db_max -1

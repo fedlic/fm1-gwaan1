@@ -1,0 +1,96 @@
+# GWAAN-1 v0.2 ping probe: poll the ping counter every 1 s for 45 s
+# (DEEP, KNOB4 at full from the start, same opening as proto2.txt).
+# The host prints the actual count per poll: increments = ping times.
+wait 500
+master 4096
+turn K4 22
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1
+wait 1000
+expect sig >-1

@@ -1,0 +1,23 @@
+# GWAAN-1 v0.2 prototype capture: ~90 s for the user's ears.
+# 0-45 s: DEEP with KNOB4 (DRIFT) at full from the start - the SIGNAL
+# layer's beacon patterns drift in over the drone (first pattern ~2 s in,
+# then every ~7-20 s). KNOB3 stays at the default 70: plenty of space.
+# 45-90 s: a KNOB2 (DEPTH) sweep in steps, 0 -> 32 -> 64 -> 96 -> 127:
+# the pad chorus widens, the swells deepen and the root-x4 body grows -
+# the drone audibly fattens, ending at full depth for the last ~10 s.
+wait 500
+master 4096
+turn K4 22
+wav proto2.wav
+wait 44500
+turn K2 -16
+wait 5000
+turn K2 8
+wait 10000
+turn K2 8
+wait 10000
+turn K2 8
+wait 10000
+turn K2 8
+wait 9500
+wavstop

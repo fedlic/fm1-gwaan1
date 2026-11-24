@@ -1,0 +1,27 @@
+# GWAAN-1 v0.2 SIGNAL layer: KNOB4's lower travel is v0.1's drift only -
+# no beacons. Above ~15% the amount grows; at full DRIFT the patterns come.
+# Boot defaults: scene DEEP, k4 = 40 (amount ~0.19: an occasional pattern
+# is legal, so first pin the knob to zero and prove the layer is off.)
+wait 600
+turn K4 -10
+wait 100
+expect k4 0
+wait 20000
+expect sig 0
+expect sigpat 0
+# full DRIFT: the first pattern decision lands within ~2 s (the clock was
+# kept deferred while off), then patterns of 1-4 pings every ~7-20 s (DEEP).
+turn K4 32
+wait 100
+expect k4 127
+wait 50000
+expect sigpat >0
+expect sig >2
+# and the whole mix still respects the limiter while the beacons fire
+master 4096
+peakreset
+wav sig.wav
+wait 6000
+wavstop
+expect peak_db_min -36
+expect peak_db_max -1

@@ -1,0 +1,95 @@
+# GWAAN-1 in the host simulator: tools/build.py gwaan1 --host, then
+#   gwaan1/build/host/gwaan1_host gwaan1/tests/gwaan1.txt gwaan1/build/host
+# Boot: the three layers generate by themselves (the attract).
+wait 600
+shot boot.png
+expect playing 1
+expect scene 0
+expect field 0
+# the key LEDs: the whole keyboard breathes at dim level
+expect leddimn 27
+# generation runs: mihyon voices and drops are scheduled in the render path
+wait 9000
+expect notes >1
+# capture the sound at full MASTER: non-silent, and the limiter keeps it under full scale
+master 4096
+peakreset
+wav gen.wav
+wait 4000
+wavstop
+expect peak_db_min -36
+expect peak_db_max -1
+# PRESETS (turn) cycles the scene: DEEP -> FOREST -> back
+turn PRESET 1
+wait 100
+expect scene 1
+expect turns2 1
+shot scene.png
+turn PRESET -1
+wait 100
+expect scene 0
+# SELECT encoder: the main filter's character (4 detents per click, +-48)
+turn SELECT -12
+wait 100
+expect sel -48
+turn SELECT 24
+wait 100
+expect sel 48
+turn SELECT -12
+wait 100
+expect sel 0
+# the knob macros move (4 per click)
+turn K1 10
+wait 100
+expect k1 104
+turn K2 -16
+wait 100
+expect k2 0
+turn K3 8
+wait 100
+expect k3 102
+turn K4 -10
+wait 100
+expect k4 0
+# a key plays a scale-locked note; after release it melts, still audible 1.5 s on
+key 5 down
+wait 100
+expect ledlit 1
+key 5 up
+wait 100
+peakreset
+wav rel.wav
+wait 1500
+wavstop
+expect peak_db_min -42
+# REC held: the chord-field hold latches on, and off again
+press REC
+wait 800
+release REC
+wait 100
+expect hold 1
+expect field 0
+press REC
+wait 800
+release REC
+wait 100
+expect hold 0
+# SAVE persists; a reboot keeps scene / knobs / playing
+tap SAVE
+wait 50
+expect dirty 0
+expect store_writes 1
+reboot
+wait 600
+expect scene 0
+expect k1 104
+expect k3 102
+expect playing 1
+shot reboot.png
+# PLAY stops and starts the generation
+tap PLAY
+wait 100
+expect playing 0
+tap PLAY
+wait 100
+expect playing 1

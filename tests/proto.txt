@@ -1,0 +1,15 @@
+# GWAAN-1 prototype capture: 90 s for the user's ears.
+# 0-20 s: the DEEP scene establishes itself (mihyon glides, the sub swells,
+# air, a drop or two). At 20 s KNOB1 (glide) and KNOB3 (space) are turned
+# up: the sweeps get faster and deeper, the wash opens. The chord field
+# crossfades at 40 s (the second big swell), settling by ~55 s.
+wait 500
+master 4096
+wav proto.wav
+wait 20000
+turn K1 20
+turn K3 14
+wait 30000
+turn K1 -20
+wait 40000
+wavstop
