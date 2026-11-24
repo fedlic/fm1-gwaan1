@@ -1,0 +1,41 @@
+# GWAAN-1 v0.2.1 knob response: SHORT windows - 3 s immediately before
+# vs 3 s immediately after a knob jump. (v0.2 was verified on 40 s
+# averages, which hid exactly what the user heard on the device: turn
+# the knob, nothing happens.) Analysed offline by analyze_v021.py.
+# Part A (KNOB2 DEPTH): settle at 0, capture, jump to 127, capture.
+# The 150-600 Hz body band must jump within the first seconds.
+wait 600
+turn K4 -10
+wait 100
+expect k4 0
+turn K2 -16
+wait 100
+expect k2 0
+master 4096
+wait 3000
+wav k2a.wav
+wait 3000
+wavstop
+turn K2 32
+wait 100
+expect k2 127
+wav k2b.wav
+wait 3000
+wavstop
+# Part B (KNOB1 GLIDE): park at 0 (an 18 s cycle, 0.15 octaves - the
+# harmonics barely move), capture, then jump to 127: the answer sweep
+# fires at once and the cycle runs at 2 s / 1.65 octaves.
+wait 6000
+turn K1 -16
+wait 100
+expect k1 0
+wait 2500
+wav k1a.wav
+wait 3000
+wavstop
+turn K1 32
+wait 100
+expect k1 127
+wav k1b.wav
+wait 3000
+wavstop

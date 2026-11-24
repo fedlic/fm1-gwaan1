@@ -1,0 +1,32 @@
+# GWAAN-1 v0.2.1 SELECT: a resonant filter, not a tone tilt.
+# Captures at centre / LP mid (sel -24, cutoff ~1.45 kHz) / LP end
+# (sel -48, ~120 Hz) / HP end (sel +48, ~5 kHz), analysed offline by
+# analyze_filter.py: the ratio spectra against centre must show the
+# resonance peak near the LP-mid cutoff and steep band rejection at
+# the ends, with no clipping anywhere.
+wait 600
+turn K4 -10
+wait 100
+expect k4 0
+master 4096
+wav fcent.wav
+wait 4000
+wavstop
+turn SELECT -6
+wait 100
+expect sel -24
+wav flpmid.wav
+wait 4000
+wavstop
+turn SELECT -6
+wait 100
+expect sel -48
+wav flpend.wav
+wait 4000
+wavstop
+turn SELECT 24
+wait 100
+expect sel 48
+wav fhpend.wav
+wait 4000
+wavstop

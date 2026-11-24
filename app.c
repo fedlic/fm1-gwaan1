@@ -168,6 +168,8 @@ typedef struct {
     float gph;                           /* the glide cycle's phase */
     float peak;
     uint32_t age, atk, dur;
+    float ans_t;                         /* v0.2.1: the KNOB1 answer sweep: -1 idle, else 0..1 */
+    int8_t ans_dir;                      /* its direction: the way the knob was turned */
 } mih_t;
 static mih_t mih[NMIH];
 
@@ -209,6 +211,7 @@ static volatile uint32_t sig_pings, sig_pats;    /* the tests read these */
 static volatile uint32_t sig_last_at;        /* when the last ping started (samples) */
 static volatile float sig_last_freq;         /* its pitch (the UI shows/lights it) */
 static float body_ph, body3_ph;              /* the GUWAAN body oscillators (root x4, root x3) */
+static float body2_ph;                       /* v0.2.1: root x2 - the low-mid warmth oscillator */
 
 /* the air layer's filter state */
 static float air_lp, air_hp, air_am_ph;
@@ -237,29 +240,48 @@ static float ap_buf[2][560] __attribute__((aligned(4))) PLAT_POOL;
 static uint32_t ap_pos[2];
 static const uint16_t AP_LEN[2] = {556, 441};
 
-/* POKE-1 v0.1.1's SELECT main filter, verbatim in shape: two-pole lowpass
- * to the left (~200 Hz at the end: obviously muffled), two-stage highpass
- * to the right (~2.9 kHz: obviously thin), a true bypass in the centre,
- * and both states always tracking so leaving the centre is clickless. */
-static float flt_lp, flt_lp2, flt_hp_lp, flt_hp2_lp;
+/* SELECT (v0.2.1): a real resonant filter, replacing the POKE-1-derived
+ * tone tilt the user called out on the device ("tone, not a filter").
+ * Two Zavalishin (TPT) state-variable stages in cascade per side give a
+ * 4-pole (24 dB/oct) slope with a genuine resonance peak at the cutoff.
+ * The layout is the DJ one: the centre is fully open, the lowpass sweeps
+ * down to the left (16 kHz -> 120 Hz), the highpass up to the right
+ * (25 Hz -> 5 kHz). Both cascades process the input at all times, so
+ * crossing the centre stays clickless. Damping k = 0.65 (Q ~ 1.5 per
+ * stage, ~3 combined): squelchy, well short of self-oscillation, and
+ * the output limiter still guards the ceiling. */
+static float flt_lp_ic[2][2], flt_hp_ic[2][2];
+static float svf_stage(float x, float g, float k, float *ic, int high)
+{
+    float a1 = 1.0f / (1.0f + g * (g + k));
+    float a2 = g * a1, a3 = g * a2;
+    float v3 = x - ic[1];
+    float v1 = a1 * ic[0] + a2 * v3;
+    float v2 = ic[1] + a2 * ic[0] + a3 * v3;
+    ic[0] = 2.0f * v1 - ic[0];
+    ic[1] = 2.0f * v2 - ic[1];
+    return high ? x - k * v1 - v2 : v2;
+}
 static float main_filter(float x, float sel, float cut_mul)
 {
-    float fc = 200.0f * fm_exp2f((sel + 1.0f) * 6.5f) * cut_mul;
-    float hc = 60.0f * fm_exp2f((sel > 0.0f ? sel : 0.0f) * 5.6f);
-    float a, ha, y;
-    if (fc > 9000.0f)
-        fc = 9000.0f;
-    a = 1.0f - fm_expf(-6.2831853f * fc / SRATE);
-    ha = 1.0f - fm_expf(-6.2831853f * hc / SRATE);
-    flt_lp += a * (x - flt_lp);
-    flt_lp2 += a * (flt_lp - flt_lp2);
-    flt_hp_lp += ha * (x - flt_hp_lp);
-    {
-        float s1 = x - flt_hp_lp;
-        flt_hp2_lp += ha * (s1 - flt_hp2_lp);
-        y = sel < -0.02f ? flt_lp2 : sel > 0.02f ? s1 - flt_hp2_lp : x;
-    }
-    return y;
+    float t, fc, g, lp, hp;
+    /* the lowpass cascade */
+    t = sel < -0.02f ? (-sel - 0.02f) * 1.0204f : 0.0f;
+    fc = 16000.0f * fm_exp2f(-7.06f * t) * cut_mul;
+    if (fc > 16000.0f)
+        fc = 16000.0f;
+    g = fm_tanf(3.14159265f * fc / SRATE);
+    lp = svf_stage(x, g, 0.65f, flt_lp_ic[0], 0);
+    lp = svf_stage(lp, g, 0.65f, flt_lp_ic[1], 0);
+    /* the highpass cascade */
+    t = sel > 0.02f ? (sel - 0.02f) * 1.0204f : 0.0f;
+    fc = 25.0f * fm_exp2f(7.64f * t) * cut_mul;
+    if (fc < 12.0f)
+        fc = 12.0f;
+    g = fm_tanf(3.14159265f * fc / SRATE);
+    hp = svf_stage(x, g, 0.65f, flt_hp_ic[0], 1);
+    hp = svf_stage(hp, g, 0.65f, flt_hp_ic[1], 1);
+    return sel < -0.02f ? lp : sel > 0.02f ? hp : x;
 }
 
 /* -------------------------------------------------------------- scheduler --- */
@@ -300,6 +322,7 @@ static void mih_start(void)
     m->age = 0;
     m->atk = (uint32_t)((1.5f + rng_f() * 2.0f) * SRATE);
     m->dur = (uint32_t)((8.0f + rng_f() * 8.0f) * SRATE);
+    m->ans_t = -1.0f;
     m->on = 1;
     gen_notes++;
 }
@@ -494,12 +517,19 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             body3_ph += sub_freq * 3.0f / SRATE;
             if (body3_ph >= 1.0f)
                 body3_ph -= 1.0f;
+            body2_ph += sub_freq * 2.0f / SRATE;
+            if (body2_ph >= 1.0f)
+                body2_ph -= 1.0f;
             {
                 float pres = slot[0].g + slot[1].g;
-                float bg = SM.body * 0.115f * (0.55f + 0.45f * sw) * (pres > 1.0f ? 1.0f : pres);
+                float bg = SM.body * 0.19f * (0.55f + 0.45f * sw) * (pres > 1.0f ? 1.0f : pres);
                 float bp = TWO_PI * body_ph;
                 s += (fm_sinf(bp) + 0.25f * fm_sinf(2.0f * bp)) * bg;
                 s += fm_sinf(TWO_PI * body3_ph) * bg * 0.55f;   /* root x3: the fifth's body */
+                /* v0.2.1: root x2 (147-262 Hz across the scenes) - the
+                 * low-mid warmth that makes KNOB2's instant component
+                 * obvious on the built-in speaker within a second */
+                s += fm_sinf(TWO_PI * body2_ph) * bg * 0.85f;
             }
         }
         /* GUWAAN: the two field slots' pads (v0.2: detuned triples whose
@@ -528,14 +558,32 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         /* MIHYON: the gliding FM voices */
         for (v = 0; v < NMIH; v++) {
             mih_t *m = &mih[v];
-            float env, ratio;
+            float env, ratio, ans_amp = 1.0f;
             if (!m->on)
                 continue;
             m->age++;
             m->gph += 1.0f / (TGT.glide_per * SM.drift_gld * SRATE);
             if (m->gph >= 1.0f)
                 m->gph -= 1.0f;
-            ratio = m->ratio * fm_exp2f(TGT.glide_dep * fm_sinf(TWO_PI * m->gph));
+            {
+                float expo = TGT.glide_dep * fm_sinf(TWO_PI * m->gph);
+                if (m->ans_t >= 0.0f) {  /* v0.2.1: the KNOB1 answer sweep -
+                                          * a ~1.2 s glide excursion in the
+                                          * direction the knob was turned */
+                    float bump;
+                    m->ans_t += 1.0f / (1.2f * SRATE);
+                    if (m->ans_t >= 1.0f)
+                        m->ans_t = -1.0f;
+                    bump = m->ans_t >= 0.0f ? fm_sinf(3.14159265f * m->ans_t) : 0.0f;
+                    expo += (float)m->ans_dir * (0.45f + 0.55f * TGT.glide_dep) * bump;
+                    ans_amp = 1.0f + 0.35f * bump;   /* the answer also speaks up */
+                }
+                if (expo > 2.4f)
+                    expo = 2.4f;
+                else if (expo < -2.4f)
+                    expo = -2.4f;
+                ratio = m->ratio * fm_exp2f(expo);
+            }
             m->mph += m->freq * ratio / SRATE;
             if (m->mph >= 1.0f)
                 m->mph -= 1.0f;
@@ -548,7 +596,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 m->on = 0;
                 continue;
             }
-            s += fm_sinf(TWO_PI * m->ph + 2.6f * env * fm_sinf(TWO_PI * m->mph)) * env * m->peak;
+            s += fm_sinf(TWO_PI * m->ph + 2.6f * env * fm_sinf(TWO_PI * m->mph)) * env * m->peak * ans_amp;
         }
         /* the keyboard: held notes sustain, released notes melt (tau ~6 s) */
         for (v = 0; v < NKEYV; v++) {
@@ -696,6 +744,42 @@ void app_panic(void)
 }
 
 /* ------------------------------------------------------- knob macro targets - */
+/* v0.2.1: a knob turn must answer NOW, not one slow cycle later (the
+ * user's device verdict on v0.2: K1/K2 "do almost nothing" - their DSP
+ * was real but its time constants were tens of seconds). KNOB1 restarts
+ * a ~1.2 s glide sweep on every sounding mihyon voice, in the direction
+ * turned - or starts one voice fast if the layer is momentarily silent.
+ * KNOB2 restarts the swell LFO on the steep part of its cycle, rising
+ * when the knob went up, falling when it went down, so the new period
+ * and depth are heard from this second. Called from params_from_panel()
+ * whenever the panel values actually changed. */
+static void knob_answers(void)
+{
+    static int pk1 = -1, pk2 = -1;
+    if (pk1 >= 0 && set.k1 != pk1) {
+        int dir = set.k1 > pk1 ? 1 : -1, i, any = 0;
+        for (i = 0; i < NMIH; i++)
+            if (mih[i].on) {
+                mih[i].ans_t = 0.0f;
+                mih[i].ans_dir = (int8_t)dir;
+                any = 1;
+            }
+        if (!any) {                      /* nothing sounding: answer with a fresh voice */
+            mih_start();
+            for (i = 0; i < NMIH; i++)
+                if (mih[i].on) {
+                    mih[i].atk = (uint32_t)(0.25f * SRATE);
+                    mih[i].ans_t = 0.0f;
+                    mih[i].ans_dir = (int8_t)dir;
+                }
+        }
+    }
+    if (pk2 >= 0 && set.k2 != pk2)
+        swell_ph = set.k2 > pk2 ? 0.95f : 0.30f;
+    pk1 = set.k1;
+    pk2 = set.k2;
+}
+
 /* Called from the UI at frame rate: the panel's numbers become targets, and
  * the wide middle of every knob is the sweet spot. */
 static void params_from_panel(void)
@@ -703,12 +787,12 @@ static void params_from_panel(void)
     float k1 = (float)set.k1 / 127.0f, k2 = (float)set.k2 / 127.0f;
     float k3 = (float)set.k3 / 127.0f, k4 = (float)set.k4 / 127.0f;
     TGT.sel = (float)set.sel / 48.0f;
-    TGT.glide_per = 18.0f - k1 * 14.0f;              /* 18 s .. 4 s cycles */
-    TGT.glide_dep = 0.15f + k1 * 1.05f;              /* the ratio sweeps up to ~1.2 octaves */
+    TGT.glide_per = 18.0f - k1 * 16.0f;              /* 18 s .. 2 s cycles (v0.2.1: the top end runs far faster) */
+    TGT.glide_dep = 0.15f + k1 * 1.50f;              /* the ratio sweeps up to ~1.65 octaves (v0.2.1) */
     TGT.sub_w = 0.25f + k2 * 0.75f;
     TGT.swell_s = 36.0f - k2 * 16.0f;                /* 36 s .. 20 s swells */
     TGT.body = k2;                                   /* v0.2: the root-x4 body's weight */
-    TGT.detune = 0.0012f + k2 * 0.0022f;             /* v0.2: pad spread +-0.12% .. +-0.34% */
+    TGT.detune = 0.0012f + k2 * 0.0028f;             /* pad spread +-0.12% .. +-0.40% (v0.2.1) */
     TGT.swell_dep = 0.35f + k2 * 0.45f;              /* v0.2: swell depth 0.35 .. 0.80 (wide, but the trough keeps a floor) */
     TGT.echo_send = k3 * 0.8f;
     TGT.echo_fb = 0.30f + k3 * 0.48f;                /* capped again in the render */
@@ -718,6 +802,7 @@ static void params_from_panel(void)
     /* v0.2: KNOB4's travel above ~15% is the SIGNAL layer's amount - the
      * beacons fade in with the drift, they are never a separate switch. */
     TGT.sig_amt = k4 < 0.15f ? 0.0f : (k4 - 0.15f) / 0.85f;
+    knob_answers();
 }
 
 void app_init(void)
@@ -1068,7 +1153,7 @@ static void draw(void)
     if (now < ui.msg_until) {
         int32_t x = cv_text(10, 8, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 8, &FONT_B, ui.msg[1], C_HI);
-        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.2", C_GRAY);
+        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.2.1", C_GRAY);
     } else {
         int32_t x = cv_text(10, 8, &FONT_B, sc->name, C_WHITE);
         x = cv_text(x + 10, 8, &FONT_B, eng_hold ? "HOLD" : eng_playing ? "" : "STOPPED",
@@ -1077,7 +1162,7 @@ static void draw(void)
         if (sig_last_freq > 0.0f &&
             (uint32_t)sample_now - sig_last_at < (uint32_t)(1.2f * SRATE))
             cv_text(x + 10, 8, &FONT_B, "SIG", C_HI);
-        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.2", C_GRAY);
+        cv_text(10, 32, &FONT_XS, "GWAAN-1 V0.2.1", C_GRAY);
     }
     cv_blit(0, 150);
     /* the knob bars */
