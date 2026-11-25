@@ -11,6 +11,12 @@ It plays itself from power-on: slow gliding FM voices, deep swelling drones,
 distant radio-like beacons, all steered by feel-good knob macros. Never harsh,
 by design. (English summary at the bottom.)
 
+## ▶ ブラウザで聴く（インストール不要）
+
+**[fedlic.github.io/fm1-gwaan1](https://fedlic.github.io/fm1-gwaan1/)** — 開くだけで GWAAN-1（v0.4.3）がブラウザの中で鳴ります。FM-1 本体もインストールも不要です。まず音を確かめたい方はこちらから。
+
+Play it in your browser, no FM-1 and no install needed: **https://fedlic.github.io/fm1-gwaan1/**
+
 ## 音の層（4層）
 
 1. **MIHYON（ミヒョーン）** — FM ボイス。モジュレーターのピッチ比が数秒〜十数秒の周期で滑り、倍音がうねります。音は現在の和音フィールドのコードトーンから選ばれます。
@@ -69,11 +75,13 @@ USB MIDI にも対応：ノートはシーンのスケールにスナップし�
 
 ## インストール
 
-ビルド済みファームウェアは [Releases](../../releases) から `gwaan1.fwsc` をダウンロードし、
-ブラウザ・インストーラ **fm-static** で書き込みます。
+ビルド済みファームウェアは [Releases](../../releases)（最新は **v0.4.3**）から
+`gwaan1-0.4.3.fwsc` をダウンロードし、ブラウザ・インストーラ **fm-static** で書き込みます。
+同じリリースには、RemoteFM1 アプリで動く `gwaan1-0.4.3.rfm1` と、ブラウザ版エミュレータ一式の
+`gwaan1-0.4.3-web-emu.zip` も入っています（ブラウザ版は上のリンクからそのまま開けます）。
 
 1. Chrome で https://seajaysec.github.io/fm-static/ を開く
-2. `gwaan1.fwsc` を選ぶ
+2. `gwaan1-0.4.3.fwsc` を選ぶ
 3. FM-1 を USB 接続し、デバイスを選ぶ
 4. 「I've backed up what I need」にチェックして書き込み開始（書き込み中は抜かない）
 5. 完了したら電源を入れ直す
@@ -127,7 +135,10 @@ The live edition adds a mixer page (per-layer volumes + mutes), an
 arpeggiator, FREEZE / SHIMMER / CRUSH / reverse echo, a filter LFO, four
 recallable snapshots, a dice re-roll, stereo width, stage-bright key
 lights, and USB MIDI notes + CC control.
-Download `gwaan1.fwsc` from Releases and flash it with the browser installer
+Or play it right now in your browser: https://fedlic.github.io/fm1-gwaan1/ .
+To run it on hardware, download `gwaan1-0.4.3.fwsc` from Releases (latest:
+v0.4.3; the same release also carries the RemoteFM1 `.rfm1` and a web-emulator
+zip) and flash it with the browser installer
 at https://seajaysec.github.io/fm-static/ . Note: the 73 Hz sub is nearly
 inaudible on the built-in speaker — use headphones or line out. App code:
 MIT (see LICENSE). Platform (fm1-base, not included here): MPL-2.0.
